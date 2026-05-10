@@ -3,6 +3,7 @@ package honker
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"zombiezen.com/go/sqlite"
@@ -33,14 +34,8 @@ func (l *Lock) Release() error {
 	})
 }
 
-// Lock acquires a named distributed lock. Returns ErrLockHeld if the lock is
-// already held by another owner. The ctx parameter is accepted for API
-// consistency but is not currently used for cancellation during acquisition.
-func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (*Lock, error) {
-	cfg := defaultLockConfig()
-	for _, o := range opts {
-		o(&cfg)
-	}
+// tryLockOnce attempts to acquire the lock without blocking.
+func (db *Database) tryLockOnce(name string, cfg lockConfig) (*Lock, error) {
 	owner := cfg.owner
 	if owner == "" {
 		owner = uuid.New().String()
@@ -52,7 +47,6 @@ func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (
 
 	var lock *Lock
 	err := db.WithTx(func(tx *Tx) error {
-		// 1. Delete expired locks for this name.
 		if err := sqlitex.Execute(tx.conn,
 			`DELETE FROM _honker_locks WHERE name = ? AND expires_at < unixepoch()`,
 			&sqlitex.ExecOptions{
@@ -62,7 +56,6 @@ func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (
 			return fmt.Errorf("delete expired: %w", err)
 		}
 
-		// 2. Try to insert the lock.
 		if err := sqlitex.Execute(tx.conn,
 			`INSERT OR IGNORE INTO _honker_locks (name, owner, expires_at) VALUES (?, ?, unixepoch() + ?)`,
 			&sqlitex.ExecOptions{
@@ -72,7 +65,6 @@ func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (
 			return fmt.Errorf("insert lock: %w", err)
 		}
 
-		// 3. Check who owns the lock.
 		var currentOwner string
 		if err := sqlitex.Execute(tx.conn,
 			`SELECT owner FROM _honker_locks WHERE name = ?`,
@@ -105,9 +97,50 @@ func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (
 	return lock, nil
 }
 
-// TryLock is a convenience wrapper around Lock using context.Background().
+// TryLock attempts to acquire a named lock without blocking.
+// Returns ErrLockHeld if the lock is already held by another owner.
 func (db *Database) TryLock(name string, opts ...LockOption) (*Lock, error) {
-	return db.Lock(context.Background(), name, opts...)
+	cfg := defaultLockConfig()
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return db.tryLockOnce(name, cfg)
+}
+
+// Lock acquires a named lock, blocking until available or ctx is cancelled.
+func (db *Database) Lock(ctx context.Context, name string, opts ...LockOption) (*Lock, error) {
+	cfg := defaultLockConfig()
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	l, err := db.tryLockOnce(name, cfg)
+	if err == nil {
+		return l, nil
+	}
+	if err != ErrLockHeld {
+		return nil, err
+	}
+
+	wakeCh, unsub := db.watcher.Subscribe()
+	defer unsub()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-wakeCh:
+		case <-time.After(time.Second):
+		}
+
+		l, err := db.tryLockOnce(name, cfg)
+		if err == nil {
+			return l, nil
+		}
+		if err != ErrLockHeld {
+			return nil, err
+		}
+	}
 }
 
 // WithLock acquires the named lock, executes fn, then releases the lock.

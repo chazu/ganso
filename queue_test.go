@@ -327,7 +327,9 @@ func TestQueueWaitResult(t *testing.T) {
 	}
 
 	// Save result in a goroutine after a small delay.
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		time.Sleep(50 * time.Millisecond)
 		_ = q.SaveResult(id, "done", 3600)
 	}()
@@ -342,6 +344,7 @@ func TestQueueWaitResult(t *testing.T) {
 	if string(val) != `"done"` {
 		t.Errorf("WaitResult = %s, want \"done\"", val)
 	}
+	<-done
 }
 
 func TestQueueEnqueueTx(t *testing.T) {
@@ -427,8 +430,7 @@ func TestQueueClaimsChannel(t *testing.T) {
 	db := openTestDB(t)
 	q := db.Queue("claims-chan")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	ch := q.Claims(ctx, "w1", honker.WithIdlePoll(50*time.Millisecond))
 
@@ -437,6 +439,9 @@ func TestQueueClaimsChannel(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		q.Enqueue("via channel")
 	}()
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 
 	select {
 	case job := <-ch:
@@ -448,8 +453,13 @@ func TestQueueClaimsChannel(t *testing.T) {
 		if p != "via channel" {
 			t.Errorf("payload = %v, want 'via channel'", p)
 		}
-	case <-ctx.Done():
+	case <-timer.C:
 		t.Fatal("timed out waiting for job on channel")
+	}
+
+	// Cancel and drain to let Claims goroutine exit before db.Close().
+	cancel()
+	for range ch {
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/google/uuid"
@@ -352,6 +353,19 @@ func (q *Queue) Claims(ctx context.Context, workerID string, opts ...ClaimOption
 	}()
 
 	return ch
+}
+
+// ClaimIter returns a range-over-func iterator that yields jobs as they
+// become available. Cancel the context to stop iteration.
+func (q *Queue) ClaimIter(ctx context.Context, workerID string, opts ...ClaimOption) iter.Seq[*Job] {
+	return func(yield func(*Job) bool) {
+		ch := q.Claims(ctx, workerID, opts...)
+		for job := range ch {
+			if !yield(job) {
+				return
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
