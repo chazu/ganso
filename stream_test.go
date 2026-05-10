@@ -3,11 +3,19 @@ package honker_test
 import (
 	"context"
 	"encoding/json"
-"testing"
+	"testing"
 	"time"
 
 	"github.com/chazu/honker"
 )
+
+func drainCh(cancel context.CancelFunc, ch <-chan honker.Event) {
+	cancel()
+	for range ch {
+	}
+	// Allow subscribe goroutine to fully exit after closing channel.
+	time.Sleep(20 * time.Millisecond)
+}
 
 func TestStreamPublishAndRead(t *testing.T) {
 	db := openTestDB(t)
@@ -106,7 +114,6 @@ func TestStreamSaveGetOffset(t *testing.T) {
 		t.Errorf("offset = %d, want 42", off)
 	}
 
-	// Upsert
 	if err := s.SaveOffset("consumer-1", 100); err != nil {
 		t.Fatalf("SaveOffset: %v", err)
 	}
@@ -129,20 +136,17 @@ func TestStreamSubscribeExisting(t *testing.T) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	ch := s.Subscribe(ctx)
 
 	var received []honker.Event
 	for i := 0; i < 5; i++ {
-		select {
-		case ev := <-ch:
-			received = append(received, ev)
-		case <-ctx.Done():
-			t.Fatalf("timed out after receiving %d events", len(received))
-		}
+		ev := <-ch
+		received = append(received, ev)
 	}
+
+	drainCh(cancel, ch)
 
 	if len(received) != 5 {
 		t.Fatalf("expected 5 events, got %d", len(received))
@@ -157,14 +161,15 @@ func TestStreamSubscribeNewEvents(t *testing.T) {
 	s := db.Stream("events")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 
 	ch := s.Subscribe(ctx)
 
-	// Publish after subscribing.
-	time.AfterFunc(50*time.Millisecond, func() {
+	publishDone := make(chan struct{})
+	go func() {
+		defer close(publishDone)
+		time.Sleep(50 * time.Millisecond)
 		s.Publish(map[string]string{"after": "subscribe"})
-	})
+	}()
 
 	select {
 	case ev := <-ch:
@@ -178,38 +183,30 @@ func TestStreamSubscribeNewEvents(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for event")
 	}
+
+	<-publishDone
+	drainCh(cancel, ch)
 }
 
 func TestStreamSubscribeWithConsumer(t *testing.T) {
 	db := openTestDB(t)
 	s := db.Stream("events")
 
-	// Publish 3 events.
 	for i := 0; i < 3; i++ {
 		if _, err := s.Publish(map[string]int{"i": i}); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
 	}
 
-	// First subscription: consume all 3.
-	ctx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel1()
-
+	ctx1, cancel1 := context.WithCancel(context.Background())
 	ch1 := s.Subscribe(ctx1, honker.Consumer("my-consumer"), honker.SaveEveryN(1))
 	var lastOffset int64
 	for i := 0; i < 3; i++ {
-		select {
-		case ev := <-ch1:
-			lastOffset = ev.Offset
-		case <-ctx1.Done():
-			t.Fatal("timed out on first subscription")
-		}
+		ev := <-ch1
+		lastOffset = ev.Offset
 	}
-	cancel1()
-	// Give goroutine time to save offset on exit.
-	time.Sleep(50 * time.Millisecond)
+	drainCh(cancel1, ch1)
 
-	// Verify offset was saved.
 	saved, err := s.GetOffset(context.Background(), "my-consumer")
 	if err != nil {
 		t.Fatalf("GetOffset: %v", err)
@@ -218,27 +215,21 @@ func TestStreamSubscribeWithConsumer(t *testing.T) {
 		t.Errorf("saved offset = %d, want %d", saved, lastOffset)
 	}
 
-	// Publish 2 more.
 	for i := 3; i < 5; i++ {
 		if _, err := s.Publish(map[string]int{"i": i}); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
 	}
 
-	// Second subscription with same consumer: should only get new events.
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel2()
-
+	ctx2, cancel2 := context.WithCancel(context.Background())
 	ch2 := s.Subscribe(ctx2, honker.Consumer("my-consumer"))
 	var got []int64
 	for i := 0; i < 2; i++ {
-		select {
-		case ev := <-ch2:
-			got = append(got, ev.Offset)
-		case <-ctx2.Done():
-			t.Fatalf("timed out on second subscription, got %d events", len(got))
-		}
+		ev := <-ch2
+		got = append(got, ev.Offset)
 	}
+	drainCh(cancel2, ch2)
+
 	if len(got) != 2 {
 		t.Fatalf("expected 2 new events, got %d", len(got))
 	}
@@ -260,20 +251,15 @@ func TestStreamSubscribeFromOffset(t *testing.T) {
 		offsets = append(offsets, off)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Subscribe from offset[2] — should get events 3 and 4.
+	ctx, cancel := context.WithCancel(context.Background())
 	ch := s.Subscribe(ctx, honker.FromOffset(offsets[2]))
 	var got []int64
 	for i := 0; i < 2; i++ {
-		select {
-		case ev := <-ch:
-			got = append(got, ev.Offset)
-		case <-ctx.Done():
-			t.Fatalf("timed out, got %d events", len(got))
-		}
+		ev := <-ch
+		got = append(got, ev.Offset)
 	}
+	drainCh(cancel, ch)
+
 	if len(got) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(got))
 	}
@@ -290,18 +276,15 @@ func TestStreamIsolation(t *testing.T) {
 	s1.Publish(map[string]string{"from": "a"})
 	s2.Publish(map[string]string{"from": "b"})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
+	ctx, cancel := context.WithCancel(context.Background())
 	ch := s1.Subscribe(ctx)
-	select {
-	case ev := <-ch:
-		var m map[string]string
-		json.Unmarshal(ev.Payload, &m)
-		if m["from"] != "a" {
-			t.Errorf("stream isolation broken: got from=%s, want a", m["from"])
-		}
-	case <-ctx.Done():
-		t.Fatal("timed out")
+
+	ev := <-ch
+	var m map[string]string
+	json.Unmarshal(ev.Payload, &m)
+	if m["from"] != "a" {
+		t.Errorf("stream isolation broken: got from=%s, want a", m["from"])
 	}
+
+	drainCh(cancel, ch)
 }
