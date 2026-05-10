@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 // Scheduler dispatches periodic tasks via cron or fixed-interval schedules.
 // Only one scheduler process is active at a time thanks to leader-lock
-// election via _honker_locks.
+// election via _ganso_locks.
 type Scheduler struct {
 	db       *Database
 	lockName string
@@ -53,7 +53,7 @@ func (s *Scheduler) Add(name, queueName string, schedule Schedule, opts ...Sched
 
 	payloadBytes, err := json.Marshal(cfg.payload)
 	if err != nil {
-		return fmt.Errorf("honker: scheduler add: marshal payload: %w", err)
+		return fmt.Errorf("ganso: scheduler add: marshal payload: %w", err)
 	}
 
 	nextFire := schedule.NextAfter(time.Now())
@@ -66,7 +66,7 @@ func (s *Scheduler) Add(name, queueName string, schedule Schedule, opts ...Sched
 
 	return s.db.WithTx(func(tx *Tx) error {
 		return sqlitex.Execute(tx.conn,
-			`INSERT OR REPLACE INTO _honker_scheduler_tasks
+			`INSERT OR REPLACE INTO _ganso_scheduler_tasks
 			 (name, queue, cron_expr, payload, priority, expires_s, next_fire_at, enabled)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
 			&sqlitex.ExecOptions{
@@ -84,17 +84,13 @@ func (s *Scheduler) Remove(name string) (bool, error) {
 	var removed bool
 	err := s.db.WithTx(func(tx *Tx) error {
 		if err := sqlitex.Execute(tx.conn,
-			`DELETE FROM _honker_scheduler_tasks WHERE name = ?`,
+			`DELETE FROM _ganso_scheduler_tasks WHERE name = ?`,
 			&sqlitex.ExecOptions{Args: []any{name}},
 		); err != nil {
 			return err
 		}
-		return sqlitex.Execute(tx.conn, `SELECT changes()`, &sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				removed = stmt.ColumnInt64(0) > 0
-				return nil
-			},
-		})
+		removed = tx.conn.Changes() > 0
+		return nil
 	})
 	return removed, err
 }
@@ -105,17 +101,13 @@ func (s *Scheduler) Pause(name string) (bool, error) {
 	var changed bool
 	err := s.db.WithTx(func(tx *Tx) error {
 		if err := sqlitex.Execute(tx.conn,
-			`UPDATE _honker_scheduler_tasks SET enabled = 0 WHERE name = ? AND enabled = 1`,
+			`UPDATE _ganso_scheduler_tasks SET enabled = 0 WHERE name = ? AND enabled = 1`,
 			&sqlitex.ExecOptions{Args: []any{name}},
 		); err != nil {
 			return err
 		}
-		return sqlitex.Execute(tx.conn, `SELECT changes()`, &sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				changed = stmt.ColumnInt64(0) > 0
-				return nil
-			},
-		})
+		changed = tx.conn.Changes() > 0
+		return nil
 	})
 	return changed, err
 }
@@ -128,7 +120,7 @@ func (s *Scheduler) Resume(name string) (bool, error) {
 		var cronExpr string
 		var found bool
 		if err := sqlitex.Execute(tx.conn,
-			`SELECT cron_expr FROM _honker_scheduler_tasks WHERE name = ? AND enabled = 0`,
+			`SELECT cron_expr FROM _ganso_scheduler_tasks WHERE name = ? AND enabled = 0`,
 			&sqlitex.ExecOptions{
 				Args: []any{name},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -151,17 +143,13 @@ func (s *Scheduler) Resume(name string) (bool, error) {
 		nextFire := sched.NextAfter(time.Now()).UTC().Format(time.RFC3339Nano)
 
 		if err := sqlitex.Execute(tx.conn,
-			`UPDATE _honker_scheduler_tasks SET enabled = 1, next_fire_at = ? WHERE name = ?`,
+			`UPDATE _ganso_scheduler_tasks SET enabled = 1, next_fire_at = ? WHERE name = ?`,
 			&sqlitex.ExecOptions{Args: []any{nextFire, name}},
 		); err != nil {
 			return err
 		}
-		return sqlitex.Execute(tx.conn, `SELECT changes()`, &sqlitex.ExecOptions{
-			ResultFunc: func(stmt *sqlite.Stmt) error {
-				changed = stmt.ColumnInt64(0) > 0
-				return nil
-			},
-		})
+		changed = tx.conn.Changes() > 0
+		return nil
 	})
 	return changed, err
 }
@@ -171,14 +159,14 @@ func (s *Scheduler) List() ([]ScheduleInfo, error) {
 	ctx := context.Background()
 	conn, err := s.db.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("honker: scheduler list: %w", err)
+		return nil, fmt.Errorf("ganso: scheduler list: %w", err)
 	}
 	defer s.db.pool.Put(conn)
 
 	var infos []ScheduleInfo
 	err = sqlitex.Execute(conn,
 		`SELECT name, queue, cron_expr, payload, priority, expires_s, next_fire_at, enabled
-		 FROM _honker_scheduler_tasks
+		 FROM _ganso_scheduler_tasks
 		 ORDER BY name`,
 		&sqlitex.ExecOptions{
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -222,12 +210,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		now := time.Now()
 
 		if err := s.tick(now); err != nil {
-			return fmt.Errorf("honker: scheduler tick: %w", err)
+			return fmt.Errorf("ganso: scheduler tick: %w", err)
 		}
 
 		soonest, err := s.soonest()
 		if err != nil {
-			return fmt.Errorf("honker: scheduler soonest: %w", err)
+			return fmt.Errorf("ganso: scheduler soonest: %w", err)
 		}
 
 		sleepDur := 60 * time.Second
@@ -264,7 +252,7 @@ func (s *Scheduler) heartbeat(ctx context.Context, lock *Lock) {
 		case <-ticker.C:
 			_ = s.db.WithTx(func(tx *Tx) error {
 				return sqlitex.Execute(tx.conn,
-					`UPDATE _honker_locks SET expires_at = unixepoch() + ? WHERE name = ?`,
+					`UPDATE _ganso_locks SET expires_at = unixepoch() + ? WHERE name = ?`,
 					&sqlitex.ExecOptions{Args: []any{lock.ttl, lock.name}},
 				)
 			})
@@ -290,7 +278,7 @@ func (s *Scheduler) tick(now time.Time) error {
 
 		if err := sqlitex.Execute(tx.conn,
 			`SELECT name, queue, cron_expr, payload, priority, expires_s, next_fire_at
-			 FROM _honker_scheduler_tasks
+			 FROM _ganso_scheduler_tasks
 			 WHERE enabled = 1 AND next_fire_at <= ?`,
 			&sqlitex.ExecOptions{
 				Args: []any{nowStr},
@@ -322,7 +310,7 @@ func (s *Scheduler) tick(now time.Time) error {
 			runAt := now.UTC().Format(time.RFC3339Nano)
 
 			if err := sqlitex.Execute(tx.conn,
-				`INSERT INTO _honker_live (id, queue, payload, run_at, priority, max_attempts, expires_at)
+				`INSERT INTO _ganso_live (id, queue, payload, run_at, priority, max_attempts, expires_at)
 				 VALUES (?, ?, ?, ?, ?, 3, ?)`,
 				&sqlitex.ExecOptions{
 					Args: []any{jobID, t.queue, t.payload, runAt, t.priority, expiresAt},
@@ -332,8 +320,8 @@ func (s *Scheduler) tick(now time.Time) error {
 			}
 
 			if err := sqlitex.Execute(tx.conn,
-				`INSERT INTO _honker_notifications (channel, payload) VALUES (?, 'new')`,
-				&sqlitex.ExecOptions{Args: []any{"honker:" + t.queue}},
+				`INSERT INTO _ganso_notifications (channel, payload) VALUES (?, 'new')`,
+				&sqlitex.ExecOptions{Args: []any{"ganso:" + t.queue}},
 			); err != nil {
 				return fmt.Errorf("notify for %q: %w", t.name, err)
 			}
@@ -354,7 +342,7 @@ func (s *Scheduler) tick(now time.Time) error {
 			}
 
 			if err := sqlitex.Execute(tx.conn,
-				`UPDATE _honker_scheduler_tasks SET next_fire_at = ? WHERE name = ?`,
+				`UPDATE _ganso_scheduler_tasks SET next_fire_at = ? WHERE name = ?`,
 				&sqlitex.ExecOptions{Args: []any{newNext.UTC().Format(time.RFC3339Nano), t.name}},
 			); err != nil {
 				return fmt.Errorf("advance next_fire_at for %q: %w", t.name, err)
@@ -375,7 +363,7 @@ func (s *Scheduler) soonest() (time.Time, error) {
 
 	var result time.Time
 	err = sqlitex.Execute(conn,
-		`SELECT MIN(next_fire_at) FROM _honker_scheduler_tasks WHERE enabled = 1`,
+		`SELECT MIN(next_fire_at) FROM _ganso_scheduler_tasks WHERE enabled = 1`,
 		&sqlitex.ExecOptions{
 			ResultFunc: func(stmt *sqlite.Stmt) error {
 				raw := stmt.ColumnText(0)

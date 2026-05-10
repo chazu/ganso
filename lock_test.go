@@ -1,11 +1,11 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestTryLockAcquireRelease(t *testing.T) {
@@ -24,19 +24,19 @@ func TestTryLockAcquireRelease(t *testing.T) {
 func TestTryLockContention(t *testing.T) {
 	db := openTestDB(t)
 
-	l1, err := db.TryLock("test-lock", honker.WithOwner("owner-1"))
+	l1, err := db.TryLock("test-lock", ganso.WithOwner("owner-1"))
 	if err != nil {
 		t.Fatalf("TryLock owner-1: %v", err)
 	}
 
-	_, err = db.TryLock("test-lock", honker.WithOwner("owner-2"))
-	if err != honker.ErrLockHeld {
+	_, err = db.TryLock("test-lock", ganso.WithOwner("owner-2"))
+	if err != ganso.ErrLockHeld {
 		t.Errorf("expected ErrLockHeld, got %v", err)
 	}
 
 	l1.Release()
 
-	l2, err := db.TryLock("test-lock", honker.WithOwner("owner-2"))
+	l2, err := db.TryLock("test-lock", ganso.WithOwner("owner-2"))
 	if err != nil {
 		t.Fatalf("TryLock after release: %v", err)
 	}
@@ -46,13 +46,13 @@ func TestTryLockContention(t *testing.T) {
 func TestTryLockSameOwnerReentrant(t *testing.T) {
 	db := openTestDB(t)
 
-	l1, err := db.TryLock("test-lock", honker.WithOwner("same"))
+	l1, err := db.TryLock("test-lock", ganso.WithOwner("same"))
 	if err != nil {
 		t.Fatalf("TryLock: %v", err)
 	}
 
 	// Same owner should fail (INSERT OR IGNORE hits, but owner matches).
-	l2, err := db.TryLock("test-lock", honker.WithOwner("same"))
+	l2, err := db.TryLock("test-lock", ganso.WithOwner("same"))
 	if err != nil {
 		t.Fatalf("same owner TryLock: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestTryLockSameOwnerReentrant(t *testing.T) {
 func TestLockBlocking(t *testing.T) {
 	db := openTestDB(t)
 
-	l1, err := db.TryLock("blocker", honker.WithOwner("holder"), honker.WithTTL(2*time.Second))
+	l1, err := db.TryLock("blocker", ganso.WithOwner("holder"), ganso.WithTTL(2*time.Second))
 	if err != nil {
 		t.Fatalf("TryLock: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestLockBlocking(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		l2, err := db.Lock(ctx, "blocker", honker.WithOwner("waiter"))
+		l2, err := db.Lock(ctx, "blocker", ganso.WithOwner("waiter"))
 		if err != nil {
 			t.Errorf("Lock waiter: %v", err)
 			return
@@ -96,7 +96,7 @@ func TestLockBlocking(t *testing.T) {
 func TestLockContextCancellation(t *testing.T) {
 	db := openTestDB(t)
 
-	_, err := db.TryLock("ctx-lock", honker.WithOwner("holder"))
+	_, err := db.TryLock("ctx-lock", ganso.WithOwner("holder"))
 	if err != nil {
 		t.Fatalf("TryLock: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestLockContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_, err = db.Lock(ctx, "ctx-lock", honker.WithOwner("waiter"))
+	_, err = db.Lock(ctx, "ctx-lock", ganso.WithOwner("waiter"))
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected DeadlineExceeded, got %v", err)
 	}
@@ -117,8 +117,8 @@ func TestWithLock(t *testing.T) {
 	err := db.WithLock(context.Background(), "wl", func() error {
 		ran = true
 		// Lock should be held — another TryLock should fail.
-		_, err := db.TryLock("wl", honker.WithOwner("other"))
-		if err != honker.ErrLockHeld {
+		_, err := db.TryLock("wl", ganso.WithOwner("other"))
+		if err != ganso.ErrLockHeld {
 			t.Errorf("expected ErrLockHeld inside WithLock, got %v", err)
 		}
 		return nil
@@ -131,7 +131,7 @@ func TestWithLock(t *testing.T) {
 	}
 
 	// Lock should be released.
-	l, err := db.TryLock("wl", honker.WithOwner("after"))
+	l, err := db.TryLock("wl", ganso.WithOwner("after"))
 	if err != nil {
 		t.Fatalf("TryLock after WithLock: %v", err)
 	}

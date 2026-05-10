@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -7,19 +7,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestSmoke_OpenCloseReopen(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 
-	db, err := honker.Open(dbPath)
+	db, err := ganso.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Notify("test", "hello")
 	})
 	if err != nil {
@@ -30,14 +30,14 @@ func TestSmoke_OpenCloseReopen(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	db2, err := honker.Open(dbPath)
+	db2, err := ganso.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 	defer db2.Close()
 
 	rows, err := db2.Query(context.Background(),
-		`SELECT payload FROM _honker_notifications WHERE channel = :ch`,
+		`SELECT payload FROM _ganso_notifications WHERE channel = :ch`,
 		map[string]any{":ch": "test"},
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestSmoke_StreamPublishSubscribe(t *testing.T) {
 	db := openTestDB(t)
 	s := db.Stream("events")
 
-	_, err := s.Publish(map[string]string{"event": "created"}, honker.WithKey("k1"))
+	_, err := s.Publish(map[string]string{"event": "created"}, ganso.WithKey("k1"))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -111,13 +111,13 @@ func TestSmoke_StreamPublishSubscribe(t *testing.T) {
 func TestSmoke_NotifyListen(t *testing.T) {
 	db := openTestDB(t)
 
-	listener, err := db.Listen("alerts", honker.FallbackPoll(50*time.Millisecond))
+	listener, err := db.Listen("alerts", ganso.FallbackPoll(50*time.Millisecond))
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
 	defer listener.Close()
 
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Notify("alerts", "fire")
 	})
 	if err != nil {
@@ -139,13 +139,13 @@ func TestSmoke_NotifyListen(t *testing.T) {
 func TestSmoke_LockUnlock(t *testing.T) {
 	db := openTestDB(t)
 
-	lock, err := db.TryLock("migration", honker.WithTTL(10*time.Second))
+	lock, err := db.TryLock("migration", ganso.WithTTL(10*time.Second))
 	if err != nil {
 		t.Fatalf("TryLock: %v", err)
 	}
 
 	_, err = db.TryLock("migration")
-	if err != honker.ErrLockHeld {
+	if err != ganso.ErrLockHeld {
 		t.Fatalf("second TryLock = %v, want ErrLockHeld", err)
 	}
 
@@ -181,7 +181,7 @@ func TestSmoke_RateLimit(t *testing.T) {
 }
 
 func TestSmoke_CronParse(t *testing.T) {
-	sched, err := honker.ParseSchedule("0 3 * * *")
+	sched, err := ganso.ParseSchedule("0 3 * * *")
 	if err != nil {
 		t.Fatalf("ParseSchedule: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestSmoke_SchedulerAddRemove(t *testing.T) {
 	db := openTestDB(t)
 	sched := db.Scheduler()
 
-	schedule, err := honker.ParseSchedule("@every 60s")
+	schedule, err := ganso.ParseSchedule("@every 60s")
 	if err != nil {
 		t.Fatalf("ParseSchedule: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSmoke_TaskCallResult(t *testing.T) {
 			sum += n
 		}
 		return sum, nil
-	}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute))
+	}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute))
 
 	result, err := handle.Call([]int{1, 2, 3})
 	if err != nil {
@@ -255,7 +255,7 @@ func TestSmoke_TaskCallResult(t *testing.T) {
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
-		db.RunWorkers(workerCtx, honker.WorkerOptions{Queue: "tasks", Concurrency: 1})
+		db.RunWorkers(workerCtx, ganso.WorkerOptions{Queue: "tasks", Concurrency: 1})
 		close(workerDone)
 	}()
 
@@ -285,7 +285,7 @@ func TestSmoke_OutboxSendDeliver(t *testing.T) {
 
 	var delivered []string
 
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		_, err := ob.Send(tx, map[string]string{"to": "user@example.com"})
 		return err
 	})

@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// Database is the central handle for all Honker primitives.
+// Database is the central handle for all Ganso primitives.
 // It owns a dedicated writer connection and a pool of reader connections.
 type Database struct {
 	path     string
@@ -35,7 +35,7 @@ type Tx struct {
 	db   *Database
 }
 
-// Open opens (or creates) a Honker database at the given path.
+// Open opens (or creates) a Ganso database at the given path.
 func Open(path string, opts ...OpenOption) (*Database, error) {
 	cfg := defaultOpenConfig()
 	for _, o := range opts {
@@ -47,19 +47,19 @@ func Open(path string, opts ...OpenOption) (*Database, error) {
 		sqlite.OpenReadWrite|sqlite.OpenCreate|sqlite.OpenWAL|sqlite.OpenURI,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("honker: open writer: %w", err)
+		return nil, fmt.Errorf("ganso: open writer: %w", err)
 	}
 
 	// Apply pragmas on writer (must be outside any transaction).
 	if err := applyPragmas(writer); err != nil {
 		writer.Close()
-		return nil, fmt.Errorf("honker: writer pragmas: %w", err)
+		return nil, fmt.Errorf("ganso: writer pragmas: %w", err)
 	}
 
 	// Bootstrap the schema on the writer.
 	if err := bootstrapSchema(writer); err != nil {
 		writer.Close()
-		return nil, fmt.Errorf("honker: bootstrap schema: %w", err)
+		return nil, fmt.Errorf("ganso: bootstrap schema: %w", err)
 	}
 
 	// Open the reader pool.
@@ -72,7 +72,7 @@ func Open(path string, opts ...OpenOption) (*Database, error) {
 	})
 	if err != nil {
 		writer.Close()
-		return nil, fmt.Errorf("honker: open reader pool: %w", err)
+		return nil, fmt.Errorf("ganso: open reader pool: %w", err)
 	}
 
 	db := &Database{
@@ -121,7 +121,7 @@ func (db *Database) WithTx(fn func(tx *Tx) error) error {
 
 	endFn, err := sqlitex.ImmediateTransaction(db.writer)
 	if err != nil {
-		return fmt.Errorf("honker: begin tx: %w", err)
+		return fmt.Errorf("ganso: begin tx: %w", err)
 	}
 
 	txErr := fn(&Tx{conn: db.writer, db: db})
@@ -167,10 +167,10 @@ func (tx *Tx) Query(query string, named map[string]any) ([]map[string]any, error
 	return rows, err
 }
 
-// Notify inserts a notification into the _honker_notifications table.
+// Notify inserts a notification into the _ganso_notifications table.
 func (tx *Tx) Notify(channel, payload string) error {
 	return tx.Execute(
-		`INSERT INTO _honker_notifications (channel, payload) VALUES (:channel, :payload)`,
+		`INSERT INTO _ganso_notifications (channel, payload) VALUES (:channel, :payload)`,
 		map[string]any{
 			":channel": channel,
 			":payload": payload,
@@ -187,7 +187,7 @@ func (db *Database) Query(ctx context.Context, query string, named map[string]an
 
 	conn, err := db.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("honker: take reader conn: %w", err)
+		return nil, fmt.Errorf("ganso: take reader conn: %w", err)
 	}
 	defer db.pool.Put(conn)
 

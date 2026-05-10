@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"errors"
@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	ErrLockHeld    = errors.New("honker: lock is already held")
-	ErrClosed      = errors.New("honker: database is closed")
-	ErrUnknownTask = errors.New("honker: unknown task")
+	ErrLockHeld    = errors.New("ganso: lock is already held")
+	ErrClosed      = errors.New("ganso: database is closed")
+	ErrUnknownTask = errors.New("ganso: unknown task")
 )
 
 // Retryable wraps an error to request retry with a specific delay.

@@ -11,28 +11,28 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func main() {
-	dir, _ := os.MkdirTemp("", "honker-queue-example")
+	dir, _ := os.MkdirTemp("", "ganso-queue-example")
 	defer os.RemoveAll(dir)
 
-	db, err := honker.Open(filepath.Join(dir, "example.db"))
+	db, err := ganso.Open(filepath.Join(dir, "example.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	q := db.Queue("jobs", honker.WithVisibilityTimeout(5*time.Second))
+	q := db.Queue("jobs", ganso.WithVisibilityTimeout(5*time.Second))
 
 	// Enqueue 10 jobs with mixed priorities and delays.
 	for i := 0; i < 10; i++ {
 		priority := i % 3
-		var opts []honker.EnqueueOption
-		opts = append(opts, honker.WithPriority(priority))
+		var opts []ganso.EnqueueOption
+		opts = append(opts, ganso.WithPriority(priority))
 		if i%2 == 0 {
-			opts = append(opts, honker.Delay(time.Duration(i)*time.Millisecond))
+			opts = append(opts, ganso.Delay(time.Duration(i)*time.Millisecond))
 		}
 		_, err := q.Enqueue(map[string]any{"task_num": i, "priority": priority}, opts...)
 		if err != nil {
@@ -70,9 +70,9 @@ func main() {
 	wg.Wait()
 	fmt.Printf("All done. Processed %d jobs.\n", processed.Load())
 
-	// Verify no jobs left in _honker_live.
+	// Verify no jobs left in _ganso_live.
 	rows, _ := db.Query(context.Background(),
-		`SELECT COUNT(*) as cnt FROM _honker_live WHERE queue = :q`,
+		`SELECT COUNT(*) as cnt FROM _ganso_live WHERE queue = :q`,
 		map[string]any{":q": "jobs"},
 	)
 	fmt.Printf("Jobs remaining in live queue: %d\n", rows[0]["cnt"])

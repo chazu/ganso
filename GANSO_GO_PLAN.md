@@ -1,4 +1,4 @@
-# Honker-Go: Pure-Go Implementation Plan
+# Ganso-Go: Pure-Go Implementation Plan
 
 ## Using `zombiezen.com/go/sqlite` for Maximum Performance
 
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Implement Honker's full feature set as a **pure-Go library** (no CGo, no loadable extension dependency) using `zombiezen.com/go/sqlite`. Unlike the existing `honker-go` binding (which loads `libhonker_ext.dylib` via SQLite's extension API), this reimplements all SQL logic natively in Go, giving us:
+Implement Ganso's full feature set as a **pure-Go library** (no CGo, no loadable extension dependency) using `zombiezen.com/go/sqlite`. Unlike the existing `ganso-go` binding (which loads `libganso_ext.dylib` via SQLite's extension API), this reimplements all SQL logic natively in Go, giving us:
 
 - Zero CGo, cross-compilable, data-race-detector compatible
 - Prepared statement caching via `conn.Prepare()` (automatic in zombiezen)
@@ -19,8 +19,8 @@ Implement Honker's full feature set as a **pure-Go library** (no CGo, no loadabl
 ## Architecture Overview
 
 ```
-honker/
-  honker.go           # Database, Open(), options
+ganso/
+  ganso.go           # Database, Open(), options
   schema.go           # DDL constants, bootstrap, migrations
   queue.go            # Queue, Job types + all queue operations
   stream.go           # Stream, Event types + pub/sub
@@ -33,7 +33,7 @@ honker/
   worker.go           # Task registry, worker loop, TaskResult
   errors.go           # Sentinel errors (ErrLockHeld, ErrClosed, etc.)
   options.go          # Functional options for Open, Queue, etc.
-  honker_test.go      # Core integration tests
+  ganso_test.go      # Core integration tests
   queue_test.go
   stream_test.go
   scheduler_test.go
@@ -42,7 +42,7 @@ honker/
   worker_test.go
 ```
 
-**Module path:** `github.com/chazu/honker` (or your chosen path)
+**Module path:** `github.com/chazu/ganso` (or your chosen path)
 
 **Dependencies:**
 - `zombiezen.com/go/sqlite` - SQLite bindings + pool + migrations
@@ -54,20 +54,20 @@ honker/
 
 ### 1.1 Schema Constants (`schema.go`)
 
-Port `BOOTSTRAP_HONKER_SQL` verbatim from `honker-core/src/lib.rs`:
+Port `BOOTSTRAP_GANSO_SQL` verbatim from `ganso-core/src/lib.rs`:
 
 ```go
 const bootstrapSQL = `
-CREATE TABLE IF NOT EXISTS _honker_notifications ( ... );
-CREATE INDEX IF NOT EXISTS _honker_notifications_recent ...;
-CREATE TABLE IF NOT EXISTS _honker_live ( ... );
-CREATE INDEX IF NOT EXISTS _honker_live_claim ...;
--- ... all 10 tables + indexes from BOOTSTRAP_HONKER_SQL
+CREATE TABLE IF NOT EXISTS _ganso_notifications ( ... );
+CREATE INDEX IF NOT EXISTS _ganso_notifications_recent ...;
+CREATE TABLE IF NOT EXISTS _ganso_live ( ... );
+CREATE INDEX IF NOT EXISTS _ganso_live_claim ...;
+-- ... all 10 tables + indexes from BOOTSTRAP_GANSO_SQL
 `
 
 // Migration for pre-Mantle DBs (enabled column on scheduler_tasks)
 const migrateAddEnabledColumn = `
-ALTER TABLE _honker_scheduler_tasks ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1
+ALTER TABLE _ganso_scheduler_tasks ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1
 `
 ```
 
@@ -82,7 +82,7 @@ var schema = sqlitemigration.Schema{
 }
 ```
 
-### 1.2 Database Handle (`honker.go`)
+### 1.2 Database Handle (`ganso.go`)
 
 ```go
 type Database struct {
@@ -102,7 +102,7 @@ type Database struct {
 
 **Key design decisions:**
 
-1. **Single writer connection + mutex** (mirrors Honker's `Writer` slot). WAL allows only one writer; serializing in userspace avoids SQLITE_BUSY retries. Use `sync.Mutex` (Go's equivalent of `parking_lot::Mutex`).
+1. **Single writer connection + mutex** (mirrors Ganso's `Writer` slot). WAL allows only one writer; serializing in userspace avoids SQLITE_BUSY retries. Use `sync.Mutex` (Go's equivalent of `parking_lot::Mutex`).
 
 2. **Reader pool via `sqlitemigration.Pool`** - handles schema bootstrap on first connection, then provides a pool of reader connections. Size defaults to `runtime.GOMAXPROCS(0)` (typically = CPU count).
 
@@ -181,7 +181,7 @@ func (db *Database) WithTx(ctx context.Context, fn func(tx *Tx) error) error {
 
 ## Phase 2: Update Watcher (`watcher.go`)
 
-The heartbeat of Honker. A goroutine polling `PRAGMA data_version` every 1ms.
+The heartbeat of Ganso. A goroutine polling `PRAGMA data_version` every 1ms.
 
 ```go
 type UpdateWatcher struct {
@@ -244,14 +244,14 @@ func (w *UpdateWatcher) run() {
             }
         case <-identityTicker.C:
             if id := statIdentity(w.path); id != initialStat {
-                panic("honker: database file was replaced underneath us")
+                panic("ganso: database file was replaced underneath us")
             }
         }
     }
 }
 ```
 
-**Fan-out:** Each subscriber gets a buffered `chan struct{}` (cap=1). `notifyAll` does non-blocking send (coalesces bursts, same as Honker's `SyncSender<()>` with cap=1).
+**Fan-out:** Each subscriber gets a buffered `chan struct{}` (cap=1). `notifyAll` does non-blocking send (coalesces bursts, same as Ganso's `SyncSender<()>` with cap=1).
 
 ```go
 func (w *UpdateWatcher) notifyAll() {
@@ -285,7 +285,7 @@ type Notification struct {
 
 ```go
 func (tx *Tx) Notify(channel, payload string) (int64, error) {
-    // INSERT INTO _honker_notifications (channel, payload) VALUES (?, ?)
+    // INSERT INTO _ganso_notifications (channel, payload) VALUES (?, ?)
     // RETURNING id
 }
 ```
@@ -308,7 +308,7 @@ func (l *Listener) Close()
 ```
 
 `Next()` logic:
-1. Query new notifications: `SELECT * FROM _honker_notifications WHERE channel = ? AND id > ? ORDER BY id`
+1. Query new notifications: `SELECT * FROM _ganso_notifications WHERE channel = ? AND id > ? ORDER BY id`
 2. If results, return first, update `lastID`
 3. If empty, wait on update watcher channel OR fallback timeout OR ctx.Done()
 4. Loop
@@ -352,7 +352,7 @@ func (j *Job) Heartbeat(extendSec int) error
 
 ### 4.2 Queue Operations
 
-All SQL ported directly from `honker_ops.rs`. Key operations:
+All SQL ported directly from `ganso_ops.rs`. Key operations:
 
 ```go
 func (q *Queue) Enqueue(payload any, opts ...EnqueueOption) (int64, error)
@@ -377,13 +377,13 @@ Port the exact `UPDATE ... RETURNING` from `claim_batch()`:
 
 ```go
 const claimBatchSQL = `
-UPDATE _honker_live
+UPDATE _ganso_live
 SET state = 'processing',
     worker_id = :worker_id,
     claim_expires_at = unixepoch() + :timeout,
     attempts = attempts + 1
 WHERE id IN (
-  SELECT id FROM _honker_live
+  SELECT id FROM _ganso_live
   WHERE queue = :queue
     AND state IN ('pending', 'processing')
     AND (expires_at IS NULL OR expires_at > unixepoch())
@@ -450,11 +450,11 @@ func (s *Stream) SaveOffset(consumer string, offset int64) error
 func (s *Stream) GetOffset(consumer string) (int64, error)
 ```
 
-SQL from `stream_publish`, `stream_read_since`, `stream_save_offset`, `stream_get_offset` in `honker_ops.rs`.
+SQL from `stream_publish`, `stream_read_since`, `stream_save_offset`, `stream_get_offset` in `ganso_ops.rs`.
 
 **Subscribe** internally:
 1. Resolve starting offset (`GetOffset` or `fromOffset` option)
-2. Read existing events via `SELECT ... FROM _honker_stream WHERE topic = ? AND offset > ? ORDER BY offset LIMIT 100`
+2. Read existing events via `SELECT ... FROM _ganso_stream WHERE topic = ? AND offset > ? ORDER BY offset LIMIT 100`
 3. Yield them
 4. Subscribe to update watcher for new events
 5. Periodically auto-save offset (every N events or every T seconds)
@@ -485,14 +485,14 @@ func (db *Database) TryLock(name string, opts ...LockOption) (*Lock, error)
 func (db *Database) WithLock(ctx context.Context, name string, fn func() error, opts ...LockOption) error
 ```
 
-SQL from `lock_acquire` / `lock_release` in `honker_ops.rs`:
+SQL from `lock_acquire` / `lock_release` in `ganso_ops.rs`:
 
 ```go
 const lockAcquireSQL = `
-DELETE FROM _honker_locks WHERE name = :name AND expires_at < unixepoch();
-INSERT OR IGNORE INTO _honker_locks (name, owner, expires_at)
+DELETE FROM _ganso_locks WHERE name = :name AND expires_at < unixepoch();
+INSERT OR IGNORE INTO _ganso_locks (name, owner, expires_at)
 VALUES (:name, :owner, unixepoch() + :ttl);
-SELECT CASE WHEN owner = :owner THEN 1 ELSE 0 END FROM _honker_locks WHERE name = :name;
+SELECT CASE WHEN owner = :owner THEN 1 ELSE 0 END FROM _ganso_locks WHERE name = :name;
 `
 ```
 
@@ -564,7 +564,7 @@ func (s *Scheduler) Run(ctx context.Context) error
 ```
 
 **Run loop** (direct port of Python `_main_loop`):
-1. Acquire leader lock via `db.Lock("honker-scheduler", ttl=60)`
+1. Acquire leader lock via `db.Lock("ganso-scheduler", ttl=60)`
 2. Start heartbeat goroutine (refreshes lock every 30s)
 3. Loop:
    a. `schedulerTick(now)` - for each task where `next_fire_at <= now`, enqueue payload, advance `next_fire_at`
@@ -572,7 +572,7 @@ func (s *Scheduler) Run(ctx context.Context) error
    c. `select` on: ctx.Done, update watcher, timer
 4. On ctx.Done, release lock
 
-All scheduler SQL (`register`, `unregister`, `tick`, `soonest`, `pause`, `resume`, `list`, `update`) ported from `honker_ops.rs` to prepared Go statements.
+All scheduler SQL (`register`, `unregister`, `tick`, `soonest`, `pause`, `resume`, `list`, `update`) ported from `ganso_ops.rs` to prepared Go statements.
 
 ---
 
@@ -712,7 +712,7 @@ func (db *Database) Close() error {
 
 ### Why zombiezen/go-sqlite is ideal for this
 
-| Feature | Benefit for Honker |
+| Feature | Benefit for Ganso |
 |---|---|
 | **No CGo** | Cross-compile, race detector, simpler builds |
 | **`conn.Prepare()` auto-caches** | Claim/ack/enqueue hot-path statements are prepared once, reused forever |
@@ -744,7 +744,7 @@ func (db *Database) Close() error {
 
 ### Statement Caching Strategy
 
-All hot-path SQL uses `conn.Prepare()` (not `PrepareTransient`). zombiezen's `Conn.Prepare` caches prepared statements by query string, so the second call to `Prepare` with the same SQL returns the cached `*Stmt` immediately. This matches Honker's Rust `prepare_cached()`.
+All hot-path SQL uses `conn.Prepare()` (not `PrepareTransient`). zombiezen's `Conn.Prepare` caches prepared statements by query string, so the second call to `Prepare` with the same SQL returns the cached `*Stmt` immediately. This matches Ganso's Rust `prepare_cached()`.
 
 ### JSON Handling
 
@@ -754,9 +754,9 @@ Use `encoding/json.RawMessage` for payload storage to avoid unnecessary marshal/
 
 ## Cross-Process Compatibility
 
-The on-disk schema is **identical** to Honker's. A Go process and a Python/Node/Rust process can share the same `.db` file. The watcher mechanism (`PRAGMA data_version`) is the same. Wake latency characteristics are the same (~1ms polling).
+The on-disk schema is **identical** to Ganso's. A Go process and a Python/Node/Rust process can share the same `.db` file. The watcher mechanism (`PRAGMA data_version`) is the same. Wake latency characteristics are the same (~1ms polling).
 
-The `notify()` SQL function is NOT registered (it's a Rust extension function). Instead, Go code does `INSERT INTO _honker_notifications` directly, which is functionally identical. The notification table is the shared contract, not the SQL function.
+The `notify()` SQL function is NOT registered (it's a Rust extension function). Instead, Go code does `INSERT INTO _ganso_notifications` directly, which is functionally identical. The notification table is the shared contract, not the SQL function.
 
 ---
 
@@ -814,11 +814,11 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/chazu/honker"
+    "github.com/chazu/ganso"
 )
 
 func main() {
-    db, _ := honker.Open("app.db")
+    db, _ := ganso.Open("app.db")
     defer db.Close()
 
     // --- Queue ---
@@ -826,7 +826,7 @@ func main() {
     jobID, _ := q.Enqueue(map[string]any{"to": "alice@example.com"})
 
     // Atomic enqueue + business write
-    db.WithTx(context.Background(), func(tx *honker.Tx) error {
+    db.WithTx(context.Background(), func(tx *ganso.Tx) error {
         tx.Execute("INSERT INTO orders (id) VALUES (1)")
         q.EnqueueTx(tx, map[string]any{"order_id": 1})
         return nil
@@ -843,13 +843,13 @@ func main() {
     // --- Stream ---
     s := db.Stream("events")
     s.Publish(map[string]any{"type": "order.created", "id": 1})
-    for event := range s.Subscribe(ctx, honker.Consumer("analytics")) {
+    for event := range s.Subscribe(ctx, ganso.Consumer("analytics")) {
         fmt.Println("event:", event.Offset, string(event.Payload))
     }
 
     // --- Scheduler ---
     sched := db.Scheduler()
-    sched.Add("nightly-backup", "backups", honker.Crontab("0 3 * * *"))
+    sched.Add("nightly-backup", "backups", ganso.Crontab("0 3 * * *"))
     sched.Run(ctx) // blocks, runs leader loop
 
     // --- Lock ---
@@ -1104,9 +1104,9 @@ type WorkerOptions struct {
 
 ```go
 var (
-    ErrLockHeld    = errors.New("honker: lock is already held")
-    ErrClosed      = errors.New("honker: database is closed")
-    ErrUnknownTask = errors.New("honker: unknown task")
+    ErrLockHeld    = errors.New("ganso: lock is already held")
+    ErrClosed      = errors.New("ganso: database is closed")
+    ErrUnknownTask = errors.New("ganso: unknown task")
 )
 
 // Retryable wraps an error to request retry with a specific delay.
@@ -1185,5 +1185,5 @@ func WithOutboxVisibilityTimeout(d time.Duration) OutboxOption
 1. **`iter.Seq` vs channels**: Go 1.23+ range-over-func is cleaner than channels for `ClaimIter`/`Subscribe`. Support both?
 2. **Generics for payload**: `Queue[T]` with typed payloads? Or keep `json.RawMessage` + user-side marshal?
 3. **Metrics/observability**: Expose queue depth, claim rate, dead-letter count via callbacks or prometheus-style interface?
-4. **gRPC/HTTP adapter**: Optional sub-package that exposes Honker operations over network for non-Go consumers?
+4. **gRPC/HTTP adapter**: Optional sub-package that exposes Ganso operations over network for non-Go consumers?
 5. **fsnotify watcher backend**: Go has excellent `fsnotify` support; could be an alternative to polling.

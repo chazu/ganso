@@ -1,6 +1,6 @@
 //go:build darwin || linux || freebsd || openbsd || netbsd
 
-package honker
+package ganso
 
 import (
 	"os"

@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import "time"
 
@@ -266,7 +266,7 @@ type schedulerConfig struct {
 
 func defaultSchedulerConfig() schedulerConfig {
 	return schedulerConfig{
-		lockName: "_honker_scheduler_lock",
+		lockName: "_ganso_scheduler_lock",
 	}
 }
 

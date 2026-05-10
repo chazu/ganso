@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
-// Notification is a single message retrieved from the _honker_notifications table.
+// Notification is a single message retrieved from the _ganso_notifications table.
 type Notification struct {
 	ID        int64
 	Channel   string
@@ -55,7 +55,7 @@ func (db *Database) Listen(channel string, opts ...ListenOption) (*Listener, err
 	lastID, err := db.maxNotificationID(channel)
 	if err != nil {
 		unsubscribe()
-		return nil, fmt.Errorf("honker: listen: %w", err)
+		return nil, fmt.Errorf("ganso: listen: %w", err)
 	}
 
 	return &Listener{
@@ -80,7 +80,7 @@ func (db *Database) maxNotificationID(channel string) (int64, error) {
 
 	var maxID int64
 	err = sqlitex.Execute(conn,
-		`SELECT COALESCE(MAX(id), 0) FROM _honker_notifications WHERE channel = ?`,
+		`SELECT COALESCE(MAX(id), 0) FROM _ganso_notifications WHERE channel = ?`,
 		&sqlitex.ExecOptions{
 			Args: []any{channel},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -135,7 +135,7 @@ func (l *Listener) poll(ctx context.Context) (Notification, bool, error) {
 
 	conn, err := l.db.pool.Take(ctx)
 	if err != nil {
-		return Notification{}, false, fmt.Errorf("honker: listener poll: %w", err)
+		return Notification{}, false, fmt.Errorf("ganso: listener poll: %w", err)
 	}
 	defer l.db.pool.Put(conn)
 
@@ -144,7 +144,7 @@ func (l *Listener) poll(ctx context.Context) (Notification, bool, error) {
 
 	err = sqlitex.Execute(conn,
 		`SELECT id, channel, payload, created_at
-		 FROM _honker_notifications
+		 FROM _ganso_notifications
 		 WHERE channel = ? AND id > ?
 		 ORDER BY id
 		 LIMIT 1`,
@@ -161,7 +161,7 @@ func (l *Listener) poll(ctx context.Context) (Notification, bool, error) {
 		},
 	)
 	if err != nil {
-		return Notification{}, false, fmt.Errorf("honker: listener poll: %w", err)
+		return Notification{}, false, fmt.Errorf("ganso: listener poll: %w", err)
 	}
 	return n, found, nil
 }
@@ -174,12 +174,12 @@ func (l *Listener) Close() {
 }
 
 // Notify inserts a notification and returns its ID. This replaces the simpler
-// version in honker.go that does not return an ID. It uses RETURNING to
+// version in ganso.go that does not return an ID. It uses RETURNING to
 // retrieve the auto-generated rowid.
 func (tx *Tx) NotifyReturningID(channel, payload string) (int64, error) {
 	var id int64
 	err := sqlitex.Execute(tx.conn,
-		`INSERT INTO _honker_notifications (channel, payload) VALUES (?, ?) RETURNING id`,
+		`INSERT INTO _ganso_notifications (channel, payload) VALUES (?, ?) RETURNING id`,
 		&sqlitex.ExecOptions{
 			Args: []any{channel, payload},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -189,7 +189,7 @@ func (tx *Tx) NotifyReturningID(channel, payload string) (int64, error) {
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: notify: %w", err)
+		return 0, fmt.Errorf("ganso: notify: %w", err)
 	}
 	return id, nil
 }
@@ -207,22 +207,22 @@ func (db *Database) PruneNotifications(opts ...PruneOption) error {
 		if cfg.olderThan > 0 {
 			cutoff := time.Now().Add(-cfg.olderThan).UTC().Format("2006-01-02T15:04:05.000Z")
 			err := sqlitex.Execute(tx.conn,
-				`DELETE FROM _honker_notifications WHERE created_at < ?`,
+				`DELETE FROM _ganso_notifications WHERE created_at < ?`,
 				&sqlitex.ExecOptions{
 					Args: []any{cutoff},
 				},
 			)
 			if err != nil {
-				return fmt.Errorf("honker: prune by age: %w", err)
+				return fmt.Errorf("ganso: prune by age: %w", err)
 			}
 		}
 
 		// Phase 2: keep at most maxKeep rows (delete oldest beyond the limit).
 		if cfg.maxKeep > 0 {
 			err := sqlitex.Execute(tx.conn,
-				`DELETE FROM _honker_notifications
+				`DELETE FROM _ganso_notifications
 				 WHERE id NOT IN (
-				     SELECT id FROM _honker_notifications
+				     SELECT id FROM _ganso_notifications
 				     ORDER BY id DESC
 				     LIMIT ?
 				 )`,
@@ -231,7 +231,7 @@ func (db *Database) PruneNotifications(opts ...PruneOption) error {
 				},
 			)
 			if err != nil {
-				return fmt.Errorf("honker: prune by count: %w", err)
+				return fmt.Errorf("ganso: prune by count: %w", err)
 			}
 		}
 

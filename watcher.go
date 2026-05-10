@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"log"
@@ -140,20 +140,20 @@ func (w *UpdateWatcher) run() {
 
 	conn, err := openWatcherConn(w.path)
 	if err != nil {
-		log.Printf("honker: watcher: failed to open connection: %v", err)
+		log.Printf("ganso: watcher: failed to open connection: %v", err)
 		return
 	}
 	defer conn.Close()
 
 	lastVersion, err := readDataVersion(conn)
 	if err != nil {
-		log.Printf("honker: watcher: initial PRAGMA data_version failed: %v", err)
+		log.Printf("ganso: watcher: initial PRAGMA data_version failed: %v", err)
 		return
 	}
 
 	initialFID, err := getFileIdentity(w.path)
 	if err != nil {
-		log.Printf("honker: watcher: initial file identity check failed: %v", err)
+		log.Printf("ganso: watcher: initial file identity check failed: %v", err)
 		return
 	}
 
@@ -172,7 +172,7 @@ func (w *UpdateWatcher) run() {
 			version, err := readDataVersion(conn)
 			if err != nil {
 				// Connection may be broken. Try to reconnect.
-				log.Printf("honker: watcher: PRAGMA data_version error: %v; reconnecting", err)
+				log.Printf("ganso: watcher: PRAGMA data_version error: %v; reconnecting", err)
 				conn.Close()
 
 				// Conservative wake: something changed, we just can't tell what.
@@ -180,7 +180,7 @@ func (w *UpdateWatcher) run() {
 
 				conn, err = openWatcherConn(w.path)
 				if err != nil {
-					log.Printf("honker: watcher: reconnect failed: %v", err)
+					log.Printf("ganso: watcher: reconnect failed: %v", err)
 					// Back off briefly before the next tick retries.
 					continue
 				}
@@ -198,11 +198,11 @@ func (w *UpdateWatcher) run() {
 			if tickCount%100 == 0 {
 				fid, err := getFileIdentity(w.path)
 				if err != nil {
-					log.Printf("honker: watcher: file identity check failed: %v", err)
+					log.Printf("ganso: watcher: file identity check failed: %v", err)
 					continue
 				}
 				if !initialFID.equal(fid) {
-					log.Fatalf("honker: watcher: database file was replaced (inode/identity changed); aborting")
+					log.Fatalf("ganso: watcher: database file was replaced (inode/identity changed); aborting")
 				}
 			}
 		}

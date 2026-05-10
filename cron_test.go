@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"testing"

@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -72,6 +72,27 @@ func nowPlus(d time.Duration) string {
 	return time.Now().UTC().Add(d).Format("2006-01-02T15:04:05.000Z")
 }
 
+type deadLetterRow struct {
+	id          string
+	queue       string
+	payload     string
+	priority    int
+	runAt       string
+	attempts    int
+	maxAttempts int
+	createdAt   string
+}
+
+func insertDead(conn *sqlite.Conn, r deadLetterRow, errMsg string) error {
+	return sqlitex.Execute(conn,
+		`INSERT INTO _ganso_dead (id, queue, payload, priority, run_at, attempts, max_attempts, last_error, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		&sqlitex.ExecOptions{
+			Args: []any{r.id, r.queue, r.payload, r.priority, r.runAt, r.attempts, r.maxAttempts, errMsg, r.createdAt},
+		},
+	)
+}
+
 // ---------------------------------------------------------------------------
 // enqueueOnConn - shared helper for Enqueue and EnqueueTx
 // ---------------------------------------------------------------------------
@@ -97,27 +118,27 @@ func (q *Queue) enqueueOnConn(conn *sqlite.Conn, payloadBytes []byte, cfg enqueu
 		expiresAt = &s
 	}
 
-	// Insert into _honker_live.
+	// Insert into _ganso_live.
 	err := sqlitex.Execute(conn,
-		`INSERT INTO _honker_live (id, queue, payload, run_at, priority, max_attempts, expires_at)
+		`INSERT INTO _ganso_live (id, queue, payload, run_at, priority, max_attempts, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		&sqlitex.ExecOptions{
 			Args: []any{id, q.Name, string(payloadBytes), runAt, cfg.priority, q.maxAttempts, expiresAt},
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf("honker: enqueue insert: %w", err)
+		return "", fmt.Errorf("ganso: enqueue insert: %w", err)
 	}
 
 	// Insert notification to wake consumers.
 	err = sqlitex.Execute(conn,
-		`INSERT INTO _honker_notifications (channel, payload) VALUES (?, 'new')`,
+		`INSERT INTO _ganso_notifications (channel, payload) VALUES (?, 'new')`,
 		&sqlitex.ExecOptions{
-			Args: []any{"honker:" + q.Name},
+			Args: []any{"ganso:" + q.Name},
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf("honker: enqueue notify: %w", err)
+		return "", fmt.Errorf("ganso: enqueue notify: %w", err)
 	}
 
 	return id, nil
@@ -140,7 +161,7 @@ func (q *Queue) Enqueue(payload any, opts ...EnqueueOption) (string, error) {
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("honker: marshal payload: %w", err)
+		return "", fmt.Errorf("ganso: marshal payload: %w", err)
 	}
 
 	q.db.writerMu.Lock()
@@ -148,7 +169,7 @@ func (q *Queue) Enqueue(payload any, opts ...EnqueueOption) (string, error) {
 
 	endFn, err := sqlitex.ImmediateTransaction(q.db.writer)
 	if err != nil {
-		return "", fmt.Errorf("honker: begin tx: %w", err)
+		return "", fmt.Errorf("ganso: begin tx: %w", err)
 	}
 	defer endFn(&err)
 
@@ -169,7 +190,7 @@ func (q *Queue) EnqueueTx(tx *Tx, payload any, opts ...EnqueueOption) (string, e
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("honker: marshal payload: %w", err)
+		return "", fmt.Errorf("ganso: marshal payload: %w", err)
 	}
 
 	return q.enqueueOnConn(tx.conn, payloadBytes, cfg)
@@ -195,7 +216,7 @@ func (q *Queue) ClaimBatch(workerID string, n int) ([]*Job, error) {
 	// Step 1: SELECT candidate IDs in priority order.
 	var orderedIDs []string
 	err := sqlitex.Execute(q.db.writer,
-		`SELECT id FROM _honker_live
+		`SELECT id FROM _ganso_live
 		 WHERE queue = ?
 		   AND state IN ('pending', 'processing')
 		   AND (expires_at IS NULL OR expires_at > ?)
@@ -212,7 +233,7 @@ func (q *Queue) ClaimBatch(workerID string, n int) ([]*Job, error) {
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("honker: claim batch select: %w", err)
+		return nil, fmt.Errorf("ganso: claim batch select: %w", err)
 	}
 	if len(orderedIDs) == 0 {
 		return nil, nil
@@ -223,7 +244,7 @@ func (q *Queue) ClaimBatch(workerID string, n int) ([]*Job, error) {
 	jobMap := make(map[string]*Job, len(orderedIDs))
 
 	err = sqlitex.Execute(q.db.writer,
-		`UPDATE _honker_live
+		`UPDATE _ganso_live
 		 SET state = 'processing',
 		     worker_id = ?,
 		     claim_expires_at = ?,
@@ -249,7 +270,7 @@ func (q *Queue) ClaimBatch(workerID string, n int) ([]*Job, error) {
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("honker: claim batch update: %w", err)
+		return nil, fmt.Errorf("ganso: claim batch update: %w", err)
 	}
 
 	// Step 3: Return jobs in the original priority order.
@@ -384,13 +405,13 @@ func (q *Queue) Ack(jobID string, workerID string) (bool, error) {
 	defer q.db.writerMu.Unlock()
 
 	err := sqlitex.Execute(q.db.writer,
-		`DELETE FROM _honker_live WHERE id = ? AND worker_id = ? AND claim_expires_at >= ?`,
+		`DELETE FROM _ganso_live WHERE id = ? AND worker_id = ? AND claim_expires_at >= ?`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID, workerID, now()},
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: ack: %w", err)
+		return false, fmt.Errorf("ganso: ack: %w", err)
 	}
 
 	return q.db.writer.Changes() > 0, nil
@@ -409,14 +430,14 @@ func (q *Queue) AckBatch(jobIDs []string, workerID string) (int, error) {
 
 	idsJSON, err := json.Marshal(jobIDs)
 	if err != nil {
-		return 0, fmt.Errorf("honker: marshal job ids: %w", err)
+		return 0, fmt.Errorf("ganso: marshal job ids: %w", err)
 	}
 
 	q.db.writerMu.Lock()
 	defer q.db.writerMu.Unlock()
 
 	err = sqlitex.Execute(q.db.writer,
-		`DELETE FROM _honker_live
+		`DELETE FROM _ganso_live
 		 WHERE id IN (SELECT value FROM json_each(?))
 		   AND worker_id = ?
 		   AND claim_expires_at >= ?`,
@@ -425,7 +446,7 @@ func (q *Queue) AckBatch(jobIDs []string, workerID string) (int, error) {
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: ack batch: %w", err)
+		return 0, fmt.Errorf("ganso: ack batch: %w", err)
 	}
 
 	return q.db.writer.Changes(), nil
@@ -448,31 +469,21 @@ func (q *Queue) Retry(jobID string, workerID string, delaySec int, errMsg string
 
 	endFn, err := sqlitex.ImmediateTransaction(q.db.writer)
 	if err != nil {
-		return false, fmt.Errorf("honker: begin tx: %w", err)
+		return false, fmt.Errorf("ganso: begin tx: %w", err)
 	}
 	defer endFn(&err)
 
 	// Fetch the job to check attempts vs max_attempts.
-	type jobRow struct {
-		id          string
-		queue       string
-		payload     string
-		priority    int
-		runAt       string
-		maxAttempts int
-		attempts    int
-		createdAt   string
-	}
-	var row *jobRow
+	var row *deadLetterRow
 
 	err = sqlitex.Execute(q.db.writer,
 		`SELECT id, queue, payload, priority, run_at, max_attempts, attempts, created_at
-		 FROM _honker_live
+		 FROM _ganso_live
 		 WHERE id = ? AND worker_id = ? AND claim_expires_at >= ? AND state = 'processing'`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID, workerID, now()},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				row = &jobRow{
+				row = &deadLetterRow{
 					id:          stmt.ColumnText(0),
 					queue:       stmt.ColumnText(1),
 					payload:     stmt.ColumnText(2),
@@ -487,40 +498,30 @@ func (q *Queue) Retry(jobID string, workerID string, delaySec int, errMsg string
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: retry select: %w", err)
+		return false, fmt.Errorf("ganso: retry select: %w", err)
 	}
 	if row == nil {
 		return false, nil
 	}
 
 	if row.attempts >= row.maxAttempts {
-		// Exhausted attempts: move to dead-letter queue.
 		err = sqlitex.Execute(q.db.writer,
-			`DELETE FROM _honker_live WHERE id = ?`,
+			`DELETE FROM _ganso_live WHERE id = ?`,
 			&sqlitex.ExecOptions{Args: []any{row.id}},
 		)
 		if err != nil {
-			return false, fmt.Errorf("honker: retry delete: %w", err)
+			return false, fmt.Errorf("ganso: retry delete: %w", err)
 		}
-
-		err = sqlitex.Execute(q.db.writer,
-			`INSERT INTO _honker_dead (id, queue, payload, priority, run_at, attempts, max_attempts, last_error, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			&sqlitex.ExecOptions{
-				Args: []any{row.id, row.queue, row.payload, row.priority, row.runAt, row.attempts, row.maxAttempts, errMsg, row.createdAt},
-			},
-		)
-		if err != nil {
-			return false, fmt.Errorf("honker: retry dead insert: %w", err)
+		if err = insertDead(q.db.writer, *row, errMsg); err != nil {
+			return false, fmt.Errorf("ganso: retry dead insert: %w", err)
 		}
-
 		return true, nil
 	}
 
 	// Still have attempts left: return to pending.
 	newRunAt := nowPlus(time.Duration(delaySec) * time.Second)
 	err = sqlitex.Execute(q.db.writer,
-		`UPDATE _honker_live
+		`UPDATE _ganso_live
 		 SET state = 'pending', run_at = ?, worker_id = NULL, claim_expires_at = NULL
 		 WHERE id = ?`,
 		&sqlitex.ExecOptions{
@@ -528,18 +529,18 @@ func (q *Queue) Retry(jobID string, workerID string, delaySec int, errMsg string
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: retry update: %w", err)
+		return false, fmt.Errorf("ganso: retry update: %w", err)
 	}
 
 	// Notify so consumers wake up.
 	err = sqlitex.Execute(q.db.writer,
-		`INSERT INTO _honker_notifications (channel, payload) VALUES (?, 'retry')`,
+		`INSERT INTO _ganso_notifications (channel, payload) VALUES (?, 'retry')`,
 		&sqlitex.ExecOptions{
-			Args: []any{"honker:" + q.Name},
+			Args: []any{"ganso:" + q.Name},
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: retry notify: %w", err)
+		return false, fmt.Errorf("ganso: retry notify: %w", err)
 	}
 
 	return true, nil
@@ -561,31 +562,20 @@ func (q *Queue) Fail(jobID string, workerID string, errMsg string) (bool, error)
 
 	endFn, err := sqlitex.ImmediateTransaction(q.db.writer)
 	if err != nil {
-		return false, fmt.Errorf("honker: begin tx: %w", err)
+		return false, fmt.Errorf("ganso: begin tx: %w", err)
 	}
 	defer endFn(&err)
 
-	// DELETE RETURNING to atomically remove and capture the row.
-	type deadRow struct {
-		id          string
-		queue       string
-		payload     string
-		priority    int
-		runAt       string
-		attempts    int
-		maxAttempts int
-		createdAt   string
-	}
-	var row *deadRow
+	var row *deadLetterRow
 
 	err = sqlitex.Execute(q.db.writer,
-		`DELETE FROM _honker_live
+		`DELETE FROM _ganso_live
 		 WHERE id = ? AND worker_id = ? AND claim_expires_at >= ?
 		 RETURNING id, queue, payload, priority, run_at, attempts, max_attempts, created_at`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID, workerID, now()},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				row = &deadRow{
+				row = &deadLetterRow{
 					id:          stmt.ColumnText(0),
 					queue:       stmt.ColumnText(1),
 					payload:     stmt.ColumnText(2),
@@ -600,21 +590,14 @@ func (q *Queue) Fail(jobID string, workerID string, errMsg string) (bool, error)
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: fail delete: %w", err)
+		return false, fmt.Errorf("ganso: fail delete: %w", err)
 	}
 	if row == nil {
 		return false, nil
 	}
 
-	err = sqlitex.Execute(q.db.writer,
-		`INSERT INTO _honker_dead (id, queue, payload, priority, run_at, attempts, max_attempts, last_error, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		&sqlitex.ExecOptions{
-			Args: []any{row.id, row.queue, row.payload, row.priority, row.runAt, row.attempts, row.maxAttempts, errMsg, row.createdAt},
-		},
-	)
-	if err != nil {
-		return false, fmt.Errorf("honker: fail dead insert: %w", err)
+	if err = insertDead(q.db.writer, *row, errMsg); err != nil {
+		return false, fmt.Errorf("ganso: fail dead insert: %w", err)
 	}
 
 	return true, nil
@@ -637,14 +620,14 @@ func (q *Queue) Heartbeat(jobID string, workerID string, extendSec int) (bool, e
 	defer q.db.writerMu.Unlock()
 
 	err := sqlitex.Execute(q.db.writer,
-		`UPDATE _honker_live SET claim_expires_at = ?
+		`UPDATE _ganso_live SET claim_expires_at = ?
 		 WHERE id = ? AND worker_id = ? AND claim_expires_at >= ?`,
 		&sqlitex.ExecOptions{
 			Args: []any{newExpiry, jobID, workerID, now()},
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: heartbeat: %w", err)
+		return false, fmt.Errorf("ganso: heartbeat: %w", err)
 	}
 
 	return q.db.writer.Changes() > 0, nil
@@ -665,13 +648,13 @@ func (q *Queue) Cancel(jobID string) (bool, error) {
 	defer q.db.writerMu.Unlock()
 
 	err := sqlitex.Execute(q.db.writer,
-		`DELETE FROM _honker_live WHERE id = ? AND state IN ('pending', 'processing')`,
+		`DELETE FROM _ganso_live WHERE id = ? AND state IN ('pending', 'processing')`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID},
 		},
 	)
 	if err != nil {
-		return false, fmt.Errorf("honker: cancel: %w", err)
+		return false, fmt.Errorf("ganso: cancel: %w", err)
 	}
 
 	return q.db.writer.Changes() > 0, nil
@@ -690,7 +673,7 @@ func (q *Queue) GetJob(ctx context.Context, jobID string) (*Job, error) {
 
 	conn, err := q.db.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("honker: take reader: %w", err)
+		return nil, fmt.Errorf("ganso: take reader: %w", err)
 	}
 	defer q.db.pool.Put(conn)
 
@@ -699,7 +682,7 @@ func (q *Queue) GetJob(ctx context.Context, jobID string) (*Job, error) {
 	err = sqlitex.Execute(conn,
 		`SELECT id, queue, payload, state, priority, run_at, worker_id,
 		        claim_expires_at, attempts, max_attempts, created_at, expires_at
-		 FROM _honker_live WHERE id = ?`,
+		 FROM _ganso_live WHERE id = ?`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -726,7 +709,7 @@ func (q *Queue) GetJob(ctx context.Context, jobID string) (*Job, error) {
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("honker: get job: %w", err)
+		return nil, fmt.Errorf("ganso: get job: %w", err)
 	}
 
 	return job, nil
@@ -748,30 +731,20 @@ func (q *Queue) SweepExpired() (int, error) {
 
 	endFn, err := sqlitex.ImmediateTransaction(q.db.writer)
 	if err != nil {
-		return 0, fmt.Errorf("honker: begin tx: %w", err)
+		return 0, fmt.Errorf("ganso: begin tx: %w", err)
 	}
 	defer endFn(&err)
 
-	type expiredRow struct {
-		id          string
-		queue       string
-		payload     string
-		priority    int
-		runAt       string
-		maxAttempts int
-		attempts    int
-		createdAt   string
-	}
-	var expired []expiredRow
+	var expired []deadLetterRow
 
 	err = sqlitex.Execute(q.db.writer,
-		`DELETE FROM _honker_live
+		`DELETE FROM _ganso_live
 		 WHERE queue = ? AND expires_at IS NOT NULL AND expires_at < ?
 		 RETURNING id, queue, payload, priority, run_at, max_attempts, attempts, created_at`,
 		&sqlitex.ExecOptions{
 			Args: []any{q.Name, now()},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
-				expired = append(expired, expiredRow{
+				expired = append(expired, deadLetterRow{
 					id:          stmt.ColumnText(0),
 					queue:       stmt.ColumnText(1),
 					payload:     stmt.ColumnText(2),
@@ -786,19 +759,12 @@ func (q *Queue) SweepExpired() (int, error) {
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: sweep delete: %w", err)
+		return 0, fmt.Errorf("ganso: sweep delete: %w", err)
 	}
 
 	for _, r := range expired {
-		err = sqlitex.Execute(q.db.writer,
-			`INSERT INTO _honker_dead (id, queue, payload, priority, run_at, attempts, max_attempts, last_error, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			&sqlitex.ExecOptions{
-				Args: []any{r.id, r.queue, r.payload, r.priority, r.runAt, r.attempts, r.maxAttempts, "expired", r.createdAt},
-			},
-		)
-		if err != nil {
-			return 0, fmt.Errorf("honker: sweep dead insert: %w", err)
+		if err = insertDead(q.db.writer, r, "expired"); err != nil {
+			return 0, fmt.Errorf("ganso: sweep dead insert: %w", err)
 		}
 	}
 
@@ -817,7 +783,7 @@ func (q *Queue) SaveResult(jobID string, value any, ttlSec int) error {
 
 	valBytes, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("honker: marshal result: %w", err)
+		return fmt.Errorf("ganso: marshal result: %w", err)
 	}
 
 	expiresAt := nowPlus(time.Duration(ttlSec) * time.Second)
@@ -826,7 +792,7 @@ func (q *Queue) SaveResult(jobID string, value any, ttlSec int) error {
 	defer q.db.writerMu.Unlock()
 
 	err = sqlitex.Execute(q.db.writer,
-		`INSERT INTO _honker_results (job_id, value, expires_at)
+		`INSERT INTO _ganso_results (job_id, value, expires_at)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(job_id) DO UPDATE SET value=excluded.value, created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), expires_at=excluded.expires_at`,
 		&sqlitex.ExecOptions{
@@ -834,7 +800,7 @@ func (q *Queue) SaveResult(jobID string, value any, ttlSec int) error {
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("honker: save result: %w", err)
+		return fmt.Errorf("ganso: save result: %w", err)
 	}
 
 	return nil
@@ -853,7 +819,7 @@ func (q *Queue) GetResult(ctx context.Context, jobID string) (json.RawMessage, b
 
 	conn, err := q.db.pool.Take(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("honker: take reader: %w", err)
+		return nil, false, fmt.Errorf("ganso: take reader: %w", err)
 	}
 	defer q.db.pool.Put(conn)
 
@@ -861,7 +827,7 @@ func (q *Queue) GetResult(ctx context.Context, jobID string) (json.RawMessage, b
 	var found bool
 
 	err = sqlitex.Execute(conn,
-		`SELECT value FROM _honker_results WHERE job_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
+		`SELECT value FROM _ganso_results WHERE job_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
 		&sqlitex.ExecOptions{
 			Args: []any{jobID, now()},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -872,7 +838,7 @@ func (q *Queue) GetResult(ctx context.Context, jobID string) (json.RawMessage, b
 		},
 	)
 	if err != nil {
-		return nil, false, fmt.Errorf("honker: get result: %w", err)
+		return nil, false, fmt.Errorf("ganso: get result: %w", err)
 	}
 
 	return result, found, nil
@@ -929,12 +895,12 @@ func (q *Queue) nextClaimAt() string {
 
 	err = sqlitex.Execute(conn,
 		`SELECT MIN(deadline) FROM (
-		   SELECT MIN(run_at) AS deadline FROM _honker_live
+		   SELECT MIN(run_at) AS deadline FROM _ganso_live
 		   WHERE queue = ? AND state = 'pending'
 		     AND (expires_at IS NULL OR expires_at > ?)
 		     AND run_at > ?
 		   UNION ALL
-		   SELECT MIN(claim_expires_at) AS deadline FROM _honker_live
+		   SELECT MIN(claim_expires_at) AS deadline FROM _ganso_live
 		   WHERE queue = ? AND state = 'processing'
 		     AND (expires_at IS NULL OR expires_at > ?)
 		     AND claim_expires_at >= ?

@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestOpenClose(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 
-	db, err := honker.Open(dbPath, honker.WithMaxReaders(2))
+	db, err := ganso.Open(dbPath, ganso.WithMaxReaders(2))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -27,14 +27,14 @@ func TestOpenClose(t *testing.T) {
 
 func TestWithTxAndQuery(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
 	// Write via WithTx
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Notify("test-channel", "hello")
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func TestWithTxAndQuery(t *testing.T) {
 
 	// Read via Query
 	rows, err := db.Query(context.Background(),
-		`SELECT channel, payload FROM _honker_notifications WHERE channel = :ch`,
+		`SELECT channel, payload FROM _ganso_notifications WHERE channel = :ch`,
 		map[string]any{":ch": "test-channel"},
 	)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestWithTxAndQuery(t *testing.T) {
 
 func TestQueueMemoization(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestQueueMemoization(t *testing.T) {
 
 func TestStreamMemoization(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestStreamMemoization(t *testing.T) {
 
 func TestDoubleClose(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -100,43 +100,43 @@ func TestDoubleClose(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("first Close: %v", err)
 	}
-	if err := db.Close(); err != honker.ErrClosed {
+	if err := db.Close(); err != ganso.ErrClosed {
 		t.Errorf("second Close = %v, want ErrClosed", err)
 	}
 }
 
 func TestWithTxAfterClose(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	db.Close()
 
-	err = db.WithTx(func(tx *honker.Tx) error { return nil })
-	if err != honker.ErrClosed {
+	err = db.WithTx(func(tx *ganso.Tx) error { return nil })
+	if err != ganso.ErrClosed {
 		t.Errorf("WithTx after close = %v, want ErrClosed", err)
 	}
 }
 
 func TestSchemaTablesExist(t *testing.T) {
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 
 	tables := []string{
-		"_honker_notifications",
-		"_honker_live",
-		"_honker_dead",
-		"_honker_locks",
-		"_honker_rate_limits",
-		"_honker_scheduler_tasks",
-		"_honker_results",
-		"_honker_stream",
-		"_honker_stream_consumers",
+		"_ganso_notifications",
+		"_ganso_live",
+		"_ganso_dead",
+		"_ganso_locks",
+		"_ganso_rate_limits",
+		"_ganso_scheduler_tasks",
+		"_ganso_results",
+		"_ganso_stream",
+		"_ganso_stream_consumers",
 	}
 
 	for _, table := range tables {
@@ -155,13 +155,13 @@ func TestSchemaTablesExist(t *testing.T) {
 
 	// Also check the view
 	rows, err := db.Query(context.Background(),
-		`SELECT name FROM sqlite_master WHERE type='view' AND name='_honker_jobs'`,
+		`SELECT name FROM sqlite_master WHERE type='view' AND name='_ganso_jobs'`,
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("query for view: %v", err)
 	}
 	if len(rows) == 0 {
-		t.Error("view _honker_jobs not found in schema")
+		t.Error("view _ganso_jobs not found in schema")
 	}
 }

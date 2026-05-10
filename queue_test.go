@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
-func openTestDB(t *testing.T) *honker.Database {
+func openTestDB(t *testing.T) *ganso.Database {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := honker.Open(filepath.Join(dir, "test.db"), honker.WithMaxReaders(4))
+	db, err := ganso.Open(filepath.Join(dir, "test.db"), ganso.WithMaxReaders(4))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -23,7 +23,7 @@ func openTestDB(t *testing.T) *honker.Database {
 
 func TestQueueEnqueueAndClaim(t *testing.T) {
 	db := openTestDB(t)
-	q := db.Queue("tasks", honker.WithMaxAttempts(3))
+	q := db.Queue("tasks", ganso.WithMaxAttempts(3))
 
 	type payload struct {
 		Task string `json:"task"`
@@ -130,7 +130,7 @@ func TestQueueAckBatch(t *testing.T) {
 
 func TestQueueRetryAndDeadLetter(t *testing.T) {
 	db := openTestDB(t)
-	q := db.Queue("retry-test", honker.WithMaxAttempts(2))
+	q := db.Queue("retry-test", ganso.WithMaxAttempts(2))
 
 	id, err := q.Enqueue("retry me")
 	if err != nil {
@@ -174,9 +174,9 @@ func TestQueueRetryAndDeadLetter(t *testing.T) {
 		t.Error("expected nil after dead-letter")
 	}
 
-	// Verify it's in _honker_dead.
+	// Verify it's in _ganso_dead.
 	rows, err := db.Query(context.Background(),
-		`SELECT id, last_error FROM _honker_dead WHERE id = ?`,
+		`SELECT id, last_error FROM _ganso_dead WHERE id = ?`,
 		map[string]any{"?": nil}, // Can't use named here easily, use WithTx
 	)
 	_ = rows
@@ -216,7 +216,7 @@ func TestQueueFail(t *testing.T) {
 
 func TestQueueHeartbeat(t *testing.T) {
 	db := openTestDB(t)
-	q := db.Queue("hb-test", honker.WithVisibilityTimeout(2*time.Second))
+	q := db.Queue("hb-test", ganso.WithVisibilityTimeout(2*time.Second))
 
 	_, err := q.Enqueue("heartbeat me")
 	if err != nil {
@@ -352,7 +352,7 @@ func TestQueueEnqueueTx(t *testing.T) {
 	q := db.Queue("tx-test")
 
 	var id string
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		var txErr error
 		id, txErr = q.EnqueueTx(tx, "inside tx")
 		return txErr
@@ -381,9 +381,9 @@ func TestQueueClaimBatchOrdering(t *testing.T) {
 	q := db.Queue("ordering")
 
 	// Enqueue with different priorities.
-	_, _ = q.Enqueue("low", honker.WithPriority(1))
-	_, _ = q.Enqueue("high", honker.WithPriority(10))
-	_, _ = q.Enqueue("mid", honker.WithPriority(5))
+	_, _ = q.Enqueue("low", ganso.WithPriority(1))
+	_, _ = q.Enqueue("high", ganso.WithPriority(10))
+	_, _ = q.Enqueue("mid", ganso.WithPriority(5))
 
 	jobs, err := q.ClaimBatch("w1", 3)
 	if err != nil {
@@ -414,7 +414,7 @@ func TestQueueDelayedEnqueue(t *testing.T) {
 	db := openTestDB(t)
 	q := db.Queue("delayed")
 
-	_, err := q.Enqueue("later", honker.Delay(2*time.Second))
+	_, err := q.Enqueue("later", ganso.Delay(2*time.Second))
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestQueueClaimsChannel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ch := q.Claims(ctx, "w1", honker.WithIdlePoll(50*time.Millisecond))
+	ch := q.Claims(ctx, "w1", ganso.WithIdlePoll(50*time.Millisecond))
 
 	// Enqueue after a small delay.
 	go func() {
@@ -470,9 +470,9 @@ func TestQueueSweepExpired(t *testing.T) {
 	// Enqueue with very short expiry - but since our time format is text,
 	// we need an already-expired job. Use a negative Expires won't work well.
 	// Instead, manually insert an expired record via WithTx.
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Execute(
-			`INSERT INTO _honker_live (id, queue, payload, expires_at)
+			`INSERT INTO _ganso_live (id, queue, payload, expires_at)
 			 VALUES ('expired-1', 'sweep-test', '"old"', '2000-01-01T00:00:00.000Z')`,
 			nil,
 		)

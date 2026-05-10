@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestTaskRegistryBasic(t *testing.T) {
-	reg := honker.NewRegistry()
+	reg := ganso.NewRegistry()
 
 	fn := func(_ context.Context, _ json.RawMessage) (any, error) { return nil, nil }
-	err := reg.Register(honker.TaskSpec{Name: "foo", Fn: fn, QueueName: "q"})
+	err := reg.Register(ganso.TaskSpec{Name: "foo", Fn: fn, QueueName: "q"})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestTaskRegistryBasic(t *testing.T) {
 func TestTaskCallAndWorker(t *testing.T) {
 	db := openTestDB(t)
 	q := db.Queue("work")
-	reg := honker.NewRegistry()
+	reg := ganso.NewRegistry()
 
 	var called atomic.Bool
 	fn := func(_ context.Context, payload json.RawMessage) (any, error) {
@@ -52,7 +52,7 @@ func TestTaskCallAndWorker(t *testing.T) {
 		return map[string]string{"echo": m["input"]}, nil
 	}
 
-	spec := honker.TaskSpec{
+	spec := ganso.TaskSpec{
 		Name:        "echo-task",
 		Fn:          fn,
 		QueueName:   "work",
@@ -64,7 +64,7 @@ func TestTaskCallAndWorker(t *testing.T) {
 	}
 	reg.Register(spec)
 
-	handle := q.Task("echo-task", fn, honker.WithStoreResult(true), honker.WithResultTTL(60*time.Second))
+	handle := q.Task("echo-task", fn, ganso.WithStoreResult(true), ganso.WithResultTTL(60*time.Second))
 
 	result, err := handle.Call(map[string]string{"input": "hello"})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestTaskCallAndWorker(t *testing.T) {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		db.RunWorkers(ctx, honker.WorkerOptions{
+		db.RunWorkers(ctx, ganso.WorkerOptions{
 			Queue:       "work",
 			Concurrency: 1,
 			Registry:    reg,
@@ -109,8 +109,8 @@ func TestTaskCallAndWorker(t *testing.T) {
 
 func TestTaskRetryOnError(t *testing.T) {
 	db := openTestDB(t)
-	q := db.Queue("retry-q", honker.WithMaxAttempts(3))
-	reg := honker.NewRegistry()
+	q := db.Queue("retry-q", ganso.WithMaxAttempts(3))
+	reg := ganso.NewRegistry()
 
 	var attempts atomic.Int32
 	fn := func(_ context.Context, _ json.RawMessage) (any, error) {
@@ -121,7 +121,7 @@ func TestTaskRetryOnError(t *testing.T) {
 		return "ok", nil
 	}
 
-	reg.Register(honker.TaskSpec{
+	reg.Register(ganso.TaskSpec{
 		Name:       "retry-me",
 		Fn:         fn,
 		QueueName:  "retry-q",
@@ -129,7 +129,7 @@ func TestTaskRetryOnError(t *testing.T) {
 		RetryDelay: 100 * time.Millisecond,
 	})
 
-	handle := q.Task("retry-me", fn, honker.WithRetries(3), honker.WithRetryDelay(100*time.Millisecond))
+	handle := q.Task("retry-me", fn, ganso.WithRetries(3), ganso.WithRetryDelay(100*time.Millisecond))
 	handle.Call(nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,7 +137,7 @@ func TestTaskRetryOnError(t *testing.T) {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		db.RunWorkers(ctx, honker.WorkerOptions{
+		db.RunWorkers(ctx, ganso.WorkerOptions{
 			Queue:       "retry-q",
 			Concurrency: 1,
 			Registry:    reg,

@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -31,7 +31,7 @@ func (s *Stream) publishOnConn(conn *sqlite.Conn, payloadBytes []byte, cfg publi
 	var offset int64
 
 	err := sqlitex.Execute(conn,
-		`INSERT INTO _honker_stream (topic, key, payload) VALUES (?, ?, ?) RETURNING "offset"`,
+		`INSERT INTO _ganso_stream (topic, key, payload) VALUES (?, ?, ?) RETURNING "offset"`,
 		&sqlitex.ExecOptions{
 			Args: []any{s.Name, cfg.key, string(payloadBytes)},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -41,19 +41,19 @@ func (s *Stream) publishOnConn(conn *sqlite.Conn, payloadBytes []byte, cfg publi
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: stream publish: %w", err)
+		return 0, fmt.Errorf("ganso: stream publish: %w", err)
 	}
 
 	// Insert notification so watcher-based subscribers wake up.
-	channel := "honker:stream:" + s.Name
+	channel := "ganso:stream:" + s.Name
 	err = sqlitex.Execute(conn,
-		`INSERT INTO _honker_notifications (channel, payload) VALUES (?, 'new')`,
+		`INSERT INTO _ganso_notifications (channel, payload) VALUES (?, 'new')`,
 		&sqlitex.ExecOptions{
 			Args: []any{channel},
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: stream publish notify: %w", err)
+		return 0, fmt.Errorf("ganso: stream publish notify: %w", err)
 	}
 
 	return offset, nil
@@ -73,7 +73,7 @@ func (s *Stream) Publish(payload any, opts ...PublishOption) (int64, error) {
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return 0, fmt.Errorf("honker: marshal payload: %w", err)
+		return 0, fmt.Errorf("ganso: marshal payload: %w", err)
 	}
 
 	s.db.writerMu.Lock()
@@ -81,7 +81,7 @@ func (s *Stream) Publish(payload any, opts ...PublishOption) (int64, error) {
 
 	endFn, err := sqlitex.ImmediateTransaction(s.db.writer)
 	if err != nil {
-		return 0, fmt.Errorf("honker: begin tx: %w", err)
+		return 0, fmt.Errorf("ganso: begin tx: %w", err)
 	}
 	defer endFn(&err)
 
@@ -99,7 +99,7 @@ func (s *Stream) PublishTx(tx *Tx, payload any, opts ...PublishOption) (int64, e
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return 0, fmt.Errorf("honker: marshal payload: %w", err)
+		return 0, fmt.Errorf("ganso: marshal payload: %w", err)
 	}
 
 	return s.publishOnConn(tx.conn, payloadBytes, cfg)
@@ -207,9 +207,9 @@ func (s *Stream) SaveOffset(consumer string, offset int64) error {
 	defer s.db.writerMu.Unlock()
 
 	return sqlitex.Execute(s.db.writer,
-		`INSERT INTO _honker_stream_consumers (name, topic, "offset")
+		`INSERT INTO _ganso_stream_consumers (name, topic, "offset")
 		 VALUES (?, ?, ?)
-		 ON CONFLICT (name, topic) DO UPDATE SET "offset" = MAX(excluded."offset", _honker_stream_consumers."offset")`,
+		 ON CONFLICT (name, topic) DO UPDATE SET "offset" = MAX(excluded."offset", _ganso_stream_consumers."offset")`,
 		&sqlitex.ExecOptions{
 			Args: []any{consumer, s.Name, offset},
 		},
@@ -225,13 +225,13 @@ func (s *Stream) GetOffset(ctx context.Context, consumer string) (int64, error) 
 
 	conn, err := s.db.pool.Take(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("honker: take reader conn: %w", err)
+		return 0, fmt.Errorf("ganso: take reader conn: %w", err)
 	}
 	defer s.db.pool.Put(conn)
 
 	var offset int64
 	err = sqlitex.Execute(conn,
-		`SELECT "offset" FROM _honker_stream_consumers WHERE name = ? AND topic = ?`,
+		`SELECT "offset" FROM _ganso_stream_consumers WHERE name = ? AND topic = ?`,
 		&sqlitex.ExecOptions{
 			Args: []any{consumer, s.Name},
 			ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -241,7 +241,7 @@ func (s *Stream) GetOffset(ctx context.Context, consumer string) (int64, error) 
 		},
 	)
 	if err != nil {
-		return 0, fmt.Errorf("honker: stream get offset: %w", err)
+		return 0, fmt.Errorf("ganso: stream get offset: %w", err)
 	}
 	return offset, nil
 }
@@ -251,14 +251,14 @@ func (s *Stream) GetOffset(ctx context.Context, consumer string) (int64, error) 
 func (s *Stream) readBatch(ctx context.Context, afterOffset int64, limit int) ([]Event, error) {
 	conn, err := s.db.pool.Take(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("honker: take reader conn: %w", err)
+		return nil, fmt.Errorf("ganso: take reader conn: %w", err)
 	}
 	defer s.db.pool.Put(conn)
 
 	var events []Event
 	err = sqlitex.Execute(conn,
 		`SELECT "offset", topic, key, payload, created_at
-		 FROM _honker_stream
+		 FROM _ganso_stream
 		 WHERE topic = ? AND "offset" > ?
 		 ORDER BY "offset"
 		 LIMIT ?`,
@@ -277,7 +277,7 @@ func (s *Stream) readBatch(ctx context.Context, afterOffset int64, limit int) ([
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("honker: stream read: %w", err)
+		return nil, fmt.Errorf("ganso: stream read: %w", err)
 	}
 	return events, nil
 }

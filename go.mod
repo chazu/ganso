@@ -1,4 +1,4 @@
-module github.com/chazu/honker
+module github.com/chazu/ganso
 
 go 1.26.2
 

@@ -1,4 +1,4 @@
-# Honker-Go: Examples, Acceptance Tests & Smoke Tests Plan
+# Ganso-Go: Examples, Acceptance Tests & Smoke Tests Plan
 
 ## Goal
 
@@ -18,7 +18,7 @@ Standalone `main.go` programs that double as documentation and smoke tests. Each
 - Spawn 3 worker goroutines via `ClaimIter`
 - Each worker: unmarshal payload, simulate work (sleep 10ms), ack
 - Print completion summary
-- Verify all jobs processed (none left in `_honker_live`)
+- Verify all jobs processed (none left in `_ganso_live`)
 
 ### 1.2 `examples/stream/main.go` — Event Streaming
 
@@ -92,7 +92,7 @@ Integration tests in the main package that test realistic multi-component scenar
 Enqueue task → Worker claims → Executes handler → Saves result → Caller reads result via WaitResult
 ```
 - 50 tasks, 4 workers, verify all 50 results correct
-- Verify no jobs left in `_honker_live`
+- Verify no jobs left in `_ganso_live`
 - Verify dead letter table empty
 
 ### 2.2 Scheduler → Queue → Worker Pipeline

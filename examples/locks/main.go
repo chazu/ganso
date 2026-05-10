@@ -8,21 +8,21 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func main() {
-	dir, _ := os.MkdirTemp("", "honker-locks-example")
+	dir, _ := os.MkdirTemp("", "ganso-locks-example")
 	defer os.RemoveAll(dir)
 
-	db, err := honker.Open(filepath.Join(dir, "example.db"))
+	db, err := ganso.Open(filepath.Join(dir, "example.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
 	// Acquire lock.
-	lock, err := db.TryLock("migration", honker.WithTTL(10*time.Second))
+	lock, err := db.TryLock("migration", ganso.WithTTL(10*time.Second))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func main() {
 	go func() {
 		defer close(done1)
 		_, err := db.TryLock("migration")
-		if err == honker.ErrLockHeld {
+		if err == ganso.ErrLockHeld {
 			fmt.Println("  TryLock: correctly got ErrLockHeld")
 		} else {
 			fmt.Printf("  TryLock: unexpected result: %v\n", err)
@@ -47,7 +47,7 @@ func main() {
 		defer close(done2)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		l, err := db.Lock(ctx, "migration", honker.WithTTL(5*time.Second))
+		l, err := db.Lock(ctx, "migration", ganso.WithTTL(5*time.Second))
 		if err != nil {
 			fmt.Printf("  Lock (blocking): error: %v\n", err)
 			return

@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestOutboxSendInTx(t *testing.T) {
 	db := openTestDB(t)
-	ob := db.Outbox("emails", honker.WithOutboxMaxAttempts(3))
+	ob := db.Outbox("emails", ganso.WithOutboxMaxAttempts(3))
 
 	var delivered sync.Map
 
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		_, err := ob.Send(tx, map[string]string{"to": "alice@example.com"})
 		return err
 	})
@@ -58,7 +58,7 @@ func TestOutboxTxRollbackNoDelivery(t *testing.T) {
 	db := openTestDB(t)
 	ob := db.Outbox("rollback-test")
 
-	_ = db.WithTx(func(tx *honker.Tx) error {
+	_ = db.WithTx(func(tx *ganso.Tx) error {
 		ob.Send(tx, map[string]string{"should": "vanish"})
 		return fmt.Errorf("rollback")
 	})
@@ -87,8 +87,8 @@ func TestOutboxTxRollbackNoDelivery(t *testing.T) {
 func TestOutboxRetryOnFailure(t *testing.T) {
 	db := openTestDB(t)
 	ob := db.Outbox("retry-ob",
-		honker.WithOutboxMaxAttempts(5),
-		honker.WithBaseBackoff(100*time.Millisecond),
+		ganso.WithOutboxMaxAttempts(5),
+		ganso.WithBaseBackoff(100*time.Millisecond),
 	)
 
 	ob.Enqueue(map[string]string{"msg": "retry-me"})

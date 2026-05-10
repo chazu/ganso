@@ -1,23 +1,23 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestSchedulerAddAndList(t *testing.T) {
 	db := openTestDB(t)
 	sched := db.Scheduler()
 
-	s, err := honker.ParseSchedule("*/5 * * * *")
+	s, err := ganso.ParseSchedule("*/5 * * * *")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = sched.Add("backup", "jobs", s, honker.WithSchedulePayload(map[string]string{"type": "backup"}))
+	err = sched.Add("backup", "jobs", s, ganso.WithSchedulePayload(map[string]string{"type": "backup"}))
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSchedulerRemove(t *testing.T) {
 	db := openTestDB(t)
 	sched := db.Scheduler()
 
-	s, _ := honker.ParseSchedule("0 * * * *")
+	s, _ := ganso.ParseSchedule("0 * * * *")
 	sched.Add("temp", "q", s)
 
 	removed, err := sched.Remove("temp")
@@ -68,7 +68,7 @@ func TestSchedulerPauseResume(t *testing.T) {
 	db := openTestDB(t)
 	sched := db.Scheduler()
 
-	s, _ := honker.ParseSchedule("*/10 * * * *")
+	s, _ := ganso.ParseSchedule("*/10 * * * *")
 	sched.Add("periodic", "q", s)
 
 	paused, err := sched.Pause("periodic")
@@ -109,9 +109,9 @@ func TestSchedulerRunTickFires(t *testing.T) {
 	sched := db.Scheduler()
 
 	// Schedule that fires every second.
-	s := honker.Every(1 * time.Second)
+	s := ganso.Every(1 * time.Second)
 	err := sched.Add("fast", "tick-queue", s,
-		honker.WithSchedulePayload(map[string]string{"tick": "yes"}),
+		ganso.WithSchedulePayload(map[string]string{"tick": "yes"}),
 	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
@@ -127,7 +127,7 @@ func TestSchedulerRunTickFires(t *testing.T) {
 
 	// Wait for a job to appear in the queue.
 	q := db.Queue("tick-queue")
-	var job *honker.Job
+	var job *ganso.Job
 	deadline := time.After(4 * time.Second)
 	for job == nil {
 		select {
@@ -156,8 +156,8 @@ func TestSchedulerAddReplace(t *testing.T) {
 	db := openTestDB(t)
 	sched := db.Scheduler()
 
-	s1, _ := honker.ParseSchedule("0 * * * *")
-	s2, _ := honker.ParseSchedule("*/15 * * * *")
+	s1, _ := ganso.ParseSchedule("0 * * * *")
+	s2, _ := ganso.ParseSchedule("*/15 * * * *")
 
 	sched.Add("task", "q1", s1)
 	sched.Add("task", "q2", s2)

@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
-func drainCh(cancel context.CancelFunc, ch <-chan honker.Event) {
+func drainCh(cancel context.CancelFunc, ch <-chan ganso.Event) {
 	cancel()
 	for range ch {
 	}
@@ -25,7 +25,7 @@ func TestStreamPublishAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	off2, err := s.Publish(map[string]string{"type": "updated"}, honker.WithKey("order-1"))
+	off2, err := s.Publish(map[string]string{"type": "updated"}, ganso.WithKey("order-1"))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestStreamPublishAndRead(t *testing.T) {
 	}
 
 	rows, err := db.Query(context.Background(),
-		`SELECT "offset", topic, key, payload FROM _honker_stream WHERE topic = :t ORDER BY "offset"`,
+		`SELECT "offset", topic, key, payload FROM _ganso_stream WHERE topic = :t ORDER BY "offset"`,
 		map[string]any{":t": "events"},
 	)
 	if err != nil {
@@ -54,7 +54,7 @@ func TestStreamPublishTx(t *testing.T) {
 	s := db.Stream("events")
 
 	var offset int64
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		var txErr error
 		offset, txErr = s.PublishTx(tx, map[string]string{"tx": "yes"})
 		return txErr
@@ -71,13 +71,13 @@ func TestStreamPublishTxRollback(t *testing.T) {
 	db := openTestDB(t)
 	s := db.Stream("events")
 
-	_ = db.WithTx(func(tx *honker.Tx) error {
+	_ = db.WithTx(func(tx *ganso.Tx) error {
 		_, _ = s.PublishTx(tx, map[string]string{"should": "vanish"})
 		return context.Canceled
 	})
 
 	rows, err := db.Query(context.Background(),
-		`SELECT COUNT(*) as cnt FROM _honker_stream WHERE topic = :t`,
+		`SELECT COUNT(*) as cnt FROM _ganso_stream WHERE topic = :t`,
 		map[string]any{":t": "events"},
 	)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestStreamSubscribeExisting(t *testing.T) {
 
 	ch := s.Subscribe(ctx)
 
-	var received []honker.Event
+	var received []ganso.Event
 	for i := 0; i < 5; i++ {
 		ev := <-ch
 		received = append(received, ev)
@@ -199,7 +199,7 @@ func TestStreamSubscribeWithConsumer(t *testing.T) {
 	}
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	ch1 := s.Subscribe(ctx1, honker.Consumer("my-consumer"), honker.SaveEveryN(1))
+	ch1 := s.Subscribe(ctx1, ganso.Consumer("my-consumer"), ganso.SaveEveryN(1))
 	var lastOffset int64
 	for i := 0; i < 3; i++ {
 		ev := <-ch1
@@ -222,7 +222,7 @@ func TestStreamSubscribeWithConsumer(t *testing.T) {
 	}
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	ch2 := s.Subscribe(ctx2, honker.Consumer("my-consumer"))
+	ch2 := s.Subscribe(ctx2, ganso.Consumer("my-consumer"))
 	var got []int64
 	for i := 0; i < 2; i++ {
 		ev := <-ch2
@@ -252,7 +252,7 @@ func TestStreamSubscribeFromOffset(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := s.Subscribe(ctx, honker.FromOffset(offsets[2]))
+	ch := s.Subscribe(ctx, ganso.FromOffset(offsets[2]))
 	var got []int64
 	for i := 0; i < 2; i++ {
 		ev := <-ch

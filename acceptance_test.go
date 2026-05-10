@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func TestAcceptance_QueueWorkerResultPipeline(t *testing.T) {
@@ -20,16 +20,16 @@ func TestAcceptance_QueueWorkerResultPipeline(t *testing.T) {
 		var n int
 		json.Unmarshal(payload, &n)
 		return n * 2, nil
-	}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute))
+	}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute))
 
 	const total = 50
-	results := make([]*honker.TaskResult, total)
+	results := make([]*ganso.TaskResult, total)
 	for i := 0; i < total; i++ {
 		handle := q.Task("double", func(ctx context.Context, payload json.RawMessage) (any, error) {
 			var n int
 			json.Unmarshal(payload, &n)
 			return n * 2, nil
-		}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute))
+		}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute))
 		r, err := handle.Call(i)
 		if err != nil {
 			t.Fatalf("Call %d: %v", i, err)
@@ -40,7 +40,7 @@ func TestAcceptance_QueueWorkerResultPipeline(t *testing.T) {
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
-		db.RunWorkers(workerCtx, honker.WorkerOptions{Queue: "pipeline", Concurrency: 4})
+		db.RunWorkers(workerCtx, ganso.WorkerOptions{Queue: "pipeline", Concurrency: 4})
 		close(workerDone)
 	}()
 
@@ -63,7 +63,7 @@ func TestAcceptance_QueueWorkerResultPipeline(t *testing.T) {
 	<-workerDone
 
 	rows, err := db.Query(context.Background(),
-		`SELECT COUNT(*) as cnt FROM _honker_live WHERE queue = :q`,
+		`SELECT COUNT(*) as cnt FROM _ganso_live WHERE queue = :q`,
 		map[string]any{":q": "pipeline"},
 	)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestAcceptance_QueueWorkerResultPipeline(t *testing.T) {
 	}
 
 	rows, err = db.Query(context.Background(),
-		`SELECT COUNT(*) as cnt FROM _honker_dead WHERE queue = :q`,
+		`SELECT COUNT(*) as cnt FROM _ganso_dead WHERE queue = :q`,
 		map[string]any{":q": "pipeline"},
 	)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestAcceptance_SchedulerQueueWorkerPipeline(t *testing.T) {
 	q := db.Queue("sched-q")
 
 	var count atomic.Int64
-	q.PeriodicTask("tick", honker.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
+	q.PeriodicTask("tick", ganso.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
 		count.Add(1)
 		return nil, nil
 	})
@@ -109,7 +109,7 @@ func TestAcceptance_SchedulerQueueWorkerPipeline(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		db.RunWorkers(ctx, honker.WorkerOptions{Queue: "sched-q", Concurrency: 2})
+		db.RunWorkers(ctx, ganso.WorkerOptions{Queue: "sched-q", Concurrency: 2})
 	}()
 
 	time.Sleep(5 * time.Second)
@@ -129,7 +129,7 @@ func TestAcceptance_OutboxAtomicity(t *testing.T) {
 	var delivered sync.Map
 
 	// Test 1: Commit path
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		_, err := ob.Send(tx, map[string]string{"action": "commit"})
 		return err
 	})
@@ -138,7 +138,7 @@ func TestAcceptance_OutboxAtomicity(t *testing.T) {
 	}
 
 	// Test 2: Rollback path
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		ob.Send(tx, map[string]string{"action": "rollback"})
 		return fmt.Errorf("forced rollback")
 	})
@@ -182,11 +182,11 @@ func TestAcceptance_StreamConsumerGroups(t *testing.T) {
 		}
 	}
 
-	readN := func(opts []honker.SubscribeOption, n int) []honker.Event {
+	readN := func(opts []ganso.SubscribeOption, n int) []ganso.Event {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		ch := s.Subscribe(ctx, opts...)
-		var events []honker.Event
+		var events []ganso.Event
 		for ev := range ch {
 			events = append(events, ev)
 			if len(events) >= n {
@@ -200,7 +200,7 @@ func TestAcceptance_StreamConsumerGroups(t *testing.T) {
 	}
 
 	// Consumer A reads all 100 with auto-save
-	eventsA := readN([]honker.SubscribeOption{honker.Consumer("consumer-a"), honker.SaveEveryN(1)}, 100)
+	eventsA := readN([]ganso.SubscribeOption{ganso.Consumer("consumer-a"), ganso.SaveEveryN(1)}, 100)
 	if len(eventsA) != 100 {
 		t.Fatalf("consumer A got %d events, want 100", len(eventsA))
 	}
@@ -223,13 +223,13 @@ func TestAcceptance_StreamConsumerGroups(t *testing.T) {
 	}
 
 	// Consumer A resumes from saved offset — should get 50 new
-	eventsA2 := readN([]honker.SubscribeOption{honker.Consumer("consumer-a"), honker.SaveEveryN(1)}, 50)
+	eventsA2 := readN([]ganso.SubscribeOption{ganso.Consumer("consumer-a"), ganso.SaveEveryN(1)}, 50)
 	if len(eventsA2) != 50 {
 		t.Fatalf("consumer A resumed got %d events, want 50", len(eventsA2))
 	}
 
 	// Consumer B resumes from offset 50 — should get 50 remaining + 50 new = 100
-	eventsB2 := readN([]honker.SubscribeOption{honker.Consumer("consumer-b"), honker.SaveEveryN(1)}, 100)
+	eventsB2 := readN([]ganso.SubscribeOption{ganso.Consumer("consumer-b"), ganso.SaveEveryN(1)}, 100)
 	if len(eventsB2) != 100 {
 		t.Fatalf("consumer B resumed got %d events, want 100", len(eventsB2))
 	}
@@ -250,7 +250,7 @@ func TestAcceptance_LockContention(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			lock, err := db.Lock(ctx, "counter-lock", honker.WithTTL(5*time.Second))
+			lock, err := db.Lock(ctx, "counter-lock", ganso.WithTTL(5*time.Second))
 			if err != nil {
 				t.Errorf("Lock: %v", err)
 				return
@@ -298,9 +298,9 @@ func TestAcceptance_NotifyFanOut(t *testing.T) {
 	db := openTestDB(t)
 
 	const numListeners = 5
-	listeners := make([]*honker.Listener, numListeners)
+	listeners := make([]*ganso.Listener, numListeners)
 	for i := 0; i < numListeners; i++ {
-		l, err := db.Listen("events", honker.FallbackPoll(50*time.Millisecond))
+		l, err := db.Listen("events", ganso.FallbackPoll(50*time.Millisecond))
 		if err != nil {
 			t.Fatalf("Listen %d: %v", i, err)
 		}
@@ -308,7 +308,7 @@ func TestAcceptance_NotifyFanOut(t *testing.T) {
 		listeners[i] = l
 	}
 
-	err := db.WithTx(func(tx *honker.Tx) error {
+	err := db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Notify("events", "broadcast")
 	})
 	if err != nil {
@@ -322,7 +322,7 @@ func TestAcceptance_NotifyFanOut(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, l := range listeners {
 		wg.Add(1)
-		go func(idx int, listener *honker.Listener) {
+		go func(idx int, listener *ganso.Listener) {
 			defer wg.Done()
 			n, err := listener.Next(ctx)
 			if err != nil {
@@ -341,7 +341,7 @@ func TestAcceptance_NotifyFanOut(t *testing.T) {
 
 	// Send 10 rapid notifications
 	for i := 0; i < 10; i++ {
-		err := db.WithTx(func(tx *honker.Tx) error {
+		err := db.WithTx(func(tx *ganso.Tx) error {
 			return tx.Notify("events", fmt.Sprintf("msg-%d", i))
 		})
 		if err != nil {
@@ -371,7 +371,7 @@ func TestAcceptance_MixedWorkload(t *testing.T) {
 	var eventsPublished atomic.Int64
 	var notificationsReceived atomic.Int64
 
-	q.PeriodicTask("work", honker.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
+	q.PeriodicTask("work", ganso.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
 		tasksExecuted.Add(1)
 		s.Publish(map[string]string{"from": "worker"})
 		eventsPublished.Add(1)
@@ -380,7 +380,7 @@ func TestAcceptance_MixedWorkload(t *testing.T) {
 
 	sched := db.Scheduler()
 
-	listener, err := db.Listen("done", honker.FallbackPoll(50*time.Millisecond))
+	listener, err := db.Listen("done", ganso.FallbackPoll(50*time.Millisecond))
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestAcceptance_MixedWorkload(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		db.RunWorkers(ctx, honker.WorkerOptions{Queue: "mixed", Concurrency: 2})
+		db.RunWorkers(ctx, ganso.WorkerOptions{Queue: "mixed", Concurrency: 2})
 	}()
 
 	// Notification listener
@@ -420,7 +420,7 @@ func TestAcceptance_MixedWorkload(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 5; i++ {
-			db.WithTx(func(tx *honker.Tx) error {
+			db.WithTx(func(tx *ganso.Tx) error {
 				return tx.Notify("done", fmt.Sprintf("n-%d", i))
 			})
 			time.Sleep(100 * time.Millisecond)
@@ -458,9 +458,9 @@ func TestAcceptance_GracefulShutdown(t *testing.T) {
 	}
 
 	sched := db.Scheduler()
-	sched.Add("shutdown-tick", "shutdown-q", honker.Every(1*time.Second))
+	sched.Add("shutdown-tick", "shutdown-q", ganso.Every(1*time.Second))
 
-	listener, err := db.Listen("shutdown-ch", honker.FallbackPoll(50*time.Millisecond))
+	listener, err := db.Listen("shutdown-ch", ganso.FallbackPoll(50*time.Millisecond))
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestAcceptance_GracefulShutdown(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		db.RunWorkers(ctx, honker.WorkerOptions{Queue: "shutdown-q", Concurrency: 4})
+		db.RunWorkers(ctx, ganso.WorkerOptions{Queue: "shutdown-q", Concurrency: 4})
 	}()
 
 	wg.Add(1)
@@ -485,7 +485,7 @@ func TestAcceptance_GracefulShutdown(t *testing.T) {
 		defer wg.Done()
 		subCtx, subCancel := context.WithCancel(ctx)
 		defer subCancel()
-		ch := s.Subscribe(subCtx, honker.Consumer("shutdown-consumer"))
+		ch := s.Subscribe(subCtx, ganso.Consumer("shutdown-consumer"))
 		for range ch {
 		}
 	}()
@@ -522,7 +522,7 @@ func TestAcceptance_GracefulShutdown(t *testing.T) {
 
 func TestAcceptance_VisibilityTimeoutReClaim(t *testing.T) {
 	db := openTestDB(t)
-	q := db.Queue("vis-q", honker.WithVisibilityTimeout(1*time.Second))
+	q := db.Queue("vis-q", ganso.WithVisibilityTimeout(1*time.Second))
 
 	id, err := q.Enqueue(map[string]string{"task": "reclaim"})
 	if err != nil {

@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"fmt"
@@ -19,16 +19,16 @@ PRAGMA wal_autocheckpoint = 10000;
 `
 
 const bootstrapSQL = `
-CREATE TABLE IF NOT EXISTS _honker_notifications (
+CREATE TABLE IF NOT EXISTS _ganso_notifications (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     channel  TEXT    NOT NULL,
     payload  TEXT    NOT NULL DEFAULT '',
     created_at TEXT  NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-CREATE INDEX IF NOT EXISTS _honker_notifications_channel_id
-    ON _honker_notifications (channel, id);
+CREATE INDEX IF NOT EXISTS _ganso_notifications_channel_id
+    ON _ganso_notifications (channel, id);
 
-CREATE TABLE IF NOT EXISTS _honker_live (
+CREATE TABLE IF NOT EXISTS _ganso_live (
     id               TEXT    PRIMARY KEY,
     queue            TEXT    NOT NULL,
     payload          TEXT    NOT NULL DEFAULT '',
@@ -42,17 +42,17 @@ CREATE TABLE IF NOT EXISTS _honker_live (
     created_at       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     expires_at       TEXT
 );
-CREATE INDEX IF NOT EXISTS _honker_live_claim
-    ON _honker_live (queue, priority DESC, run_at, id)
+CREATE INDEX IF NOT EXISTS _ganso_live_claim
+    ON _ganso_live (queue, priority DESC, run_at, id)
     WHERE state IN ('pending','processing');
-CREATE INDEX IF NOT EXISTS _honker_live_pending_deadline
-    ON _honker_live (queue, run_at)
+CREATE INDEX IF NOT EXISTS _ganso_live_pending_deadline
+    ON _ganso_live (queue, run_at)
     WHERE state = 'pending';
-CREATE INDEX IF NOT EXISTS _honker_live_processing_deadline
-    ON _honker_live (queue, claim_expires_at)
+CREATE INDEX IF NOT EXISTS _ganso_live_processing_deadline
+    ON _ganso_live (queue, claim_expires_at)
     WHERE state = 'processing';
 
-CREATE TABLE IF NOT EXISTS _honker_dead (
+CREATE TABLE IF NOT EXISTS _ganso_dead (
     id           TEXT    PRIMARY KEY,
     queue        TEXT    NOT NULL,
     payload      TEXT    NOT NULL DEFAULT '',
@@ -65,20 +65,20 @@ CREATE TABLE IF NOT EXISTS _honker_dead (
     died_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
-CREATE TABLE IF NOT EXISTS _honker_locks (
+CREATE TABLE IF NOT EXISTS _ganso_locks (
     name       TEXT PRIMARY KEY,
     owner      TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS _honker_rate_limits (
+CREATE TABLE IF NOT EXISTS _ganso_rate_limits (
     name         TEXT    NOT NULL,
     window_start TEXT    NOT NULL,
     count        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (name, window_start)
 );
 
-CREATE TABLE IF NOT EXISTS _honker_scheduler_tasks (
+CREATE TABLE IF NOT EXISTS _ganso_scheduler_tasks (
     name        TEXT PRIMARY KEY,
     queue       TEXT    NOT NULL,
     cron_expr   TEXT    NOT NULL,
@@ -89,40 +89,40 @@ CREATE TABLE IF NOT EXISTS _honker_scheduler_tasks (
     enabled     INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS _honker_results (
+CREATE TABLE IF NOT EXISTS _ganso_results (
     job_id     TEXT PRIMARY KEY,
     value      TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     expires_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS _honker_stream (
+CREATE TABLE IF NOT EXISTS _ganso_stream (
     "offset"   INTEGER PRIMARY KEY AUTOINCREMENT,
     topic      TEXT    NOT NULL,
     key        TEXT    NOT NULL DEFAULT '',
     payload    TEXT    NOT NULL DEFAULT '',
     created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-CREATE INDEX IF NOT EXISTS _honker_stream_topic_offset
-    ON _honker_stream (topic, "offset");
+CREATE INDEX IF NOT EXISTS _ganso_stream_topic_offset
+    ON _ganso_stream (topic, "offset");
 
-CREATE TABLE IF NOT EXISTS _honker_stream_consumers (
+CREATE TABLE IF NOT EXISTS _ganso_stream_consumers (
     name   TEXT    NOT NULL,
     topic  TEXT    NOT NULL,
     "offset" INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (name, topic)
 );
 
-CREATE VIEW IF NOT EXISTS _honker_jobs AS
+CREATE VIEW IF NOT EXISTS _ganso_jobs AS
     SELECT id, queue, payload, state, priority, run_at, worker_id,
            claim_expires_at, attempts, max_attempts, '' AS last_error,
            created_at, NULL AS died_at
-    FROM _honker_live
+    FROM _ganso_live
     UNION ALL
     SELECT id, queue, payload, 'dead' AS state, priority, run_at, NULL AS worker_id,
            NULL AS claim_expires_at, attempts, max_attempts, last_error,
            created_at, died_at
-    FROM _honker_dead;
+    FROM _ganso_dead;
 `
 
 // applyPragmas executes each PRAGMA statement individually outside of any

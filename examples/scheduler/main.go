@@ -11,14 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func main() {
-	dir, _ := os.MkdirTemp("", "honker-scheduler-example")
+	dir, _ := os.MkdirTemp("", "ganso-scheduler-example")
 	defer os.RemoveAll(dir)
 
-	db, err := honker.Open(filepath.Join(dir, "example.db"))
+	db, err := ganso.Open(filepath.Join(dir, "example.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,13 +29,13 @@ func main() {
 	var everySecCount atomic.Int64
 	var every2sCount atomic.Int64
 
-	q.PeriodicTask("every-1s", honker.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
+	q.PeriodicTask("every-1s", ganso.Every(1*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
 		everySecCount.Add(1)
 		fmt.Printf("  every-1s fired (count: %d)\n", everySecCount.Load())
 		return nil, nil
 	})
 
-	q.PeriodicTask("every-2s", honker.Every(2*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
+	q.PeriodicTask("every-2s", ganso.Every(2*time.Second), func(ctx context.Context, payload json.RawMessage) (any, error) {
 		every2sCount.Add(1)
 		fmt.Printf("  every-2s fired (count: %d)\n", every2sCount.Load())
 		return nil, nil
@@ -55,7 +55,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		db.RunWorkers(ctx, honker.WorkerOptions{Queue: "scheduled", Concurrency: 2})
+		db.RunWorkers(ctx, ganso.WorkerOptions{Queue: "scheduled", Concurrency: 2})
 	}()
 
 	// Run for 5 seconds.

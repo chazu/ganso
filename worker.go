@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func (r *TaskRegistry) Register(spec TaskSpec) error {
 	if existing, ok := r.tasks[spec.Name]; ok {
 		// Allow re-registration of the same function (idempotent).
 		if fmt.Sprintf("%p", existing.Fn) != fmt.Sprintf("%p", spec.Fn) {
-			return fmt.Errorf("honker: duplicate task name %q", spec.Name)
+			return fmt.Errorf("ganso: duplicate task name %q", spec.Name)
 		}
 	}
 	r.tasks[spec.Name] = &spec
@@ -104,11 +104,11 @@ type TaskHandle struct {
 func (h *TaskHandle) Call(payload any) (*TaskResult, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("honker: marshal task payload: %w", err)
+		return nil, fmt.Errorf("ganso: marshal task payload: %w", err)
 	}
 
 	envelope := taskEnvelope{
-		HonkerTask: &taskInner{
+		GansoTask: &taskInner{
 			Task: h.spec.Name,
 			Args: []json.RawMessage{payloadBytes},
 		},
@@ -177,7 +177,7 @@ func (q *Queue) PeriodicTask(name string, schedule Schedule, fn TaskFunc, opts .
 	sched := q.db.Scheduler()
 	// Build the task envelope as the scheduler payload.
 	envelope := taskEnvelope{
-		HonkerTask: &taskInner{
+		GansoTask: &taskInner{
 			Task: name,
 			Args: []json.RawMessage{json.RawMessage("null")},
 		},
@@ -231,7 +231,7 @@ func (db *Database) RunWorkers(ctx context.Context, opts WorkerOptions) error {
 		queues = reg.Queues()
 	}
 	if len(queues) == 0 {
-		return fmt.Errorf("honker: no queues to run workers on")
+		return fmt.Errorf("ganso: no queues to run workers on")
 	}
 
 	var wg sync.WaitGroup
@@ -243,7 +243,7 @@ func (db *Database) RunWorkers(ctx context.Context, opts WorkerOptions) error {
 	for _, qName := range queues {
 		q := db.Queue(qName)
 		for i := 0; i < opts.Concurrency; i++ {
-			workerID := fmt.Sprintf("honker-worker-%d-%s-%d", pid, qName, i)
+			workerID := fmt.Sprintf("ganso-worker-%d-%s-%d", pid, qName, i)
 			wg.Add(1)
 			go func(q *Queue, wid string) {
 				defer wg.Done()
@@ -261,7 +261,7 @@ func (db *Database) RunWorkers(ctx context.Context, opts WorkerOptions) error {
 
 // taskEnvelope is the JSON structure wrapping task invocations.
 type taskEnvelope struct {
-	HonkerTask *taskInner `json:"__honker_task__,omitempty"`
+	GansoTask *taskInner `json:"__ganso_task__,omitempty"`
 }
 
 type taskInner struct {
@@ -282,13 +282,13 @@ func runWorkerLoop(ctx context.Context, q *Queue, workerID string, reg *TaskRegi
 func dispatchJob(ctx context.Context, job *Job, reg *TaskRegistry) {
 	// Parse envelope.
 	var env taskEnvelope
-	if err := json.Unmarshal(job.Payload, &env); err != nil || env.HonkerTask == nil {
+	if err := json.Unmarshal(job.Payload, &env); err != nil || env.GansoTask == nil {
 		// Not a task envelope; dead-letter it.
 		_ = job.Fail("non-task payload: cannot parse envelope")
 		return
 	}
 
-	taskName := env.HonkerTask.Task
+	taskName := env.GansoTask.Task
 	spec, ok := reg.Get(taskName)
 	if !ok {
 		_ = job.Fail(fmt.Sprintf("unknown task: %q (registered: %v)", taskName, reg.Names()))
@@ -297,8 +297,8 @@ func dispatchJob(ctx context.Context, job *Job, reg *TaskRegistry) {
 
 	// Extract payload from args (first element, or null).
 	var payload json.RawMessage
-	if len(env.HonkerTask.Args) > 0 {
-		payload = env.HonkerTask.Args[0]
+	if len(env.GansoTask.Args) > 0 {
+		payload = env.GansoTask.Args[0]
 	} else {
 		payload = json.RawMessage("null")
 	}

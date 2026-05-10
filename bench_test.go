@@ -1,4 +1,4 @@
-package honker_test
+package ganso_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func BenchmarkEnqueue(b *testing.B) {
@@ -115,7 +115,7 @@ func BenchmarkNotifyListen(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := db.WithTx(func(tx *honker.Tx) error {
+		err := db.WithTx(func(tx *ganso.Tx) error {
 			return tx.Notify("bench-chan", "ping")
 		})
 		if err != nil {
@@ -157,7 +157,7 @@ func BenchmarkTryRateLimit(b *testing.B) {
 }
 
 func BenchmarkCronNextAfter(b *testing.B) {
-	s, _ := honker.ParseSchedule("*/5 * * * *")
+	s, _ := ganso.ParseSchedule("*/5 * * * *")
 	from := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
 
 	b.ResetTimer()
@@ -217,12 +217,12 @@ func BenchmarkEnqueueClaimBatch(b *testing.B) {
 func BenchmarkTaskDispatch(b *testing.B) {
 	db := benchDB(b)
 	q := db.Queue("bench-task")
-	reg := honker.NewRegistry()
+	reg := ganso.NewRegistry()
 
 	fn := func(_ context.Context, payload json.RawMessage) (any, error) {
 		return nil, nil
 	}
-	reg.Register(honker.TaskSpec{
+	reg.Register(ganso.TaskSpec{
 		Name:      "noop",
 		Fn:        fn,
 		QueueName: "bench-task",
@@ -233,7 +233,7 @@ func BenchmarkTaskDispatch(b *testing.B) {
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		db.RunWorkers(ctx, honker.WorkerOptions{
+		db.RunWorkers(ctx, ganso.WorkerOptions{
 			Queue:       "bench-task",
 			Concurrency: 1,
 			Registry:    reg,
@@ -243,7 +243,7 @@ func BenchmarkTaskDispatch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		q.Enqueue(map[string]any{
-			"__honker_task__": map[string]any{
+			"__ganso_task__": map[string]any{
 				"task": "noop",
 				"args": []any{nil},
 			},
@@ -257,9 +257,9 @@ func BenchmarkTaskDispatch(b *testing.B) {
 	<-workerDone
 }
 
-func benchDB(b *testing.B) *honker.Database {
+func benchDB(b *testing.B) *ganso.Database {
 	b.Helper()
-	db, err := honker.Open(b.TempDir()+"/bench.db", honker.WithMaxReaders(4))
+	db, err := ganso.Open(b.TempDir()+"/bench.db", ganso.WithMaxReaders(4))
 	if err != nil {
 		b.Fatal(err)
 	}

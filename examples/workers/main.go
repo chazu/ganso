@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func main() {
-	dir, _ := os.MkdirTemp("", "honker-workers-example")
+	dir, _ := os.MkdirTemp("", "ganso-workers-example")
 	defer os.RemoveAll(dir)
 
-	db, err := honker.Open(filepath.Join(dir, "example.db"))
+	db, err := ganso.Open(filepath.Join(dir, "example.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func main() {
 			sum += n
 		}
 		return sum, nil
-	}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute))
+	}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute))
 
 	// Register "fail-once" task — fails first attempt, succeeds second.
 	var failOnceAttempts atomic.Int64
@@ -44,15 +44,15 @@ func main() {
 			return nil, fmt.Errorf("transient error")
 		}
 		return "recovered", nil
-	}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute),
-		honker.WithRetries(3), honker.WithRetryDelay(100*time.Millisecond))
+	}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute),
+		ganso.WithRetries(3), ganso.WithRetryDelay(100*time.Millisecond))
 
 	// Register "slow" task — takes 200ms.
 	slowHandle := q.Task("slow", func(ctx context.Context, payload json.RawMessage) (any, error) {
 		time.Sleep(200 * time.Millisecond)
 		return "done", nil
-	}, honker.WithStoreResult(true), honker.WithResultTTL(time.Minute),
-		honker.WithTimeout(5*time.Second))
+	}, ganso.WithStoreResult(true), ganso.WithResultTTL(time.Minute),
+		ganso.WithTimeout(5*time.Second))
 
 	// Enqueue each task.
 	addResult, err := addHandle.Call([]int{10, 20, 30})
@@ -73,7 +73,7 @@ func main() {
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
-		db.RunWorkers(workerCtx, honker.WorkerOptions{Queue: "tasks", Concurrency: 2})
+		db.RunWorkers(workerCtx, ganso.WorkerOptions{Queue: "tasks", Concurrency: 2})
 		close(workerDone)
 	}()
 

@@ -9,21 +9,21 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/chazu/honker"
+	"github.com/chazu/ganso"
 )
 
 func main() {
-	dir, _ := os.MkdirTemp("", "honker-outbox-example")
+	dir, _ := os.MkdirTemp("", "ganso-outbox-example")
 	defer os.RemoveAll(dir)
 
-	db, err := honker.Open(filepath.Join(dir, "example.db"))
+	db, err := ganso.Open(filepath.Join(dir, "example.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
 	// Create a "users" table.
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		return tx.Execute(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)`, nil)
 	})
 	if err != nil {
@@ -34,7 +34,7 @@ func main() {
 	var deliveries []string
 
 	// Commit path: insert user + send welcome email in one transaction.
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		if err := tx.Execute(`INSERT INTO users (name, email) VALUES (:name, :email)`,
 			map[string]any{":name": "Alice", ":email": "alice@example.com"}); err != nil {
 			return err
@@ -48,7 +48,7 @@ func main() {
 	fmt.Println("Committed: user insert + outbox send")
 
 	// Rollback path: both should be discarded.
-	err = db.WithTx(func(tx *honker.Tx) error {
+	err = db.WithTx(func(tx *ganso.Tx) error {
 		tx.Execute(`INSERT INTO users (name, email) VALUES (:name, :email)`,
 			map[string]any{":name": "Bob", ":email": "bob@example.com"})
 		ob.Send(tx, map[string]string{"type": "welcome", "to": "bob@example.com"})

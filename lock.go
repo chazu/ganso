@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func (l *Lock) Release() error {
 	}
 	return l.db.WithTx(func(tx *Tx) error {
 		return sqlitex.Execute(tx.conn,
-			`DELETE FROM _honker_locks WHERE name = ? AND owner = ?`,
+			`DELETE FROM _ganso_locks WHERE name = ? AND owner = ?`,
 			&sqlitex.ExecOptions{
 				Args: []any{l.name, l.owner},
 			},
@@ -48,7 +48,7 @@ func (db *Database) tryLockOnce(name string, cfg lockConfig) (*Lock, error) {
 	var lock *Lock
 	err := db.WithTx(func(tx *Tx) error {
 		if err := sqlitex.Execute(tx.conn,
-			`DELETE FROM _honker_locks WHERE name = ? AND expires_at < unixepoch()`,
+			`DELETE FROM _ganso_locks WHERE name = ? AND expires_at < unixepoch()`,
 			&sqlitex.ExecOptions{
 				Args: []any{name},
 			},
@@ -57,7 +57,7 @@ func (db *Database) tryLockOnce(name string, cfg lockConfig) (*Lock, error) {
 		}
 
 		if err := sqlitex.Execute(tx.conn,
-			`INSERT OR IGNORE INTO _honker_locks (name, owner, expires_at) VALUES (?, ?, unixepoch() + ?)`,
+			`INSERT OR IGNORE INTO _ganso_locks (name, owner, expires_at) VALUES (?, ?, unixepoch() + ?)`,
 			&sqlitex.ExecOptions{
 				Args: []any{name, owner, ttlSec},
 			},
@@ -67,7 +67,7 @@ func (db *Database) tryLockOnce(name string, cfg lockConfig) (*Lock, error) {
 
 		var currentOwner string
 		if err := sqlitex.Execute(tx.conn,
-			`SELECT owner FROM _honker_locks WHERE name = ?`,
+			`SELECT owner FROM _ganso_locks WHERE name = ?`,
 			&sqlitex.ExecOptions{
 				Args: []any{name},
 				ResultFunc: func(stmt *sqlite.Stmt) error {
@@ -163,7 +163,7 @@ func (db *Database) TryRateLimit(name string, limit, perSec int) (bool, error) {
 	err := db.WithTx(func(tx *Tx) error {
 		// UPSERT: insert with count=1, or increment only if under limit.
 		if err := sqlitex.Execute(tx.conn,
-			`INSERT INTO _honker_rate_limits (name, window_start, count)
+			`INSERT INTO _ganso_rate_limits (name, window_start, count)
 			 VALUES (?, (unixepoch() / ?) * ?, 1)
 			 ON CONFLICT(name, window_start) DO UPDATE SET count = count + 1
 			 WHERE count < ?`,
@@ -199,27 +199,14 @@ func (db *Database) SweepRateLimits(olderThanSec int) (int, error) {
 	var count int
 	err := db.WithTx(func(tx *Tx) error {
 		if err := sqlitex.Execute(tx.conn,
-			`DELETE FROM _honker_rate_limits WHERE window_start < unixepoch() - ?`,
+			`DELETE FROM _ganso_rate_limits WHERE window_start < unixepoch() - ?`,
 			&sqlitex.ExecOptions{
 				Args: []any{olderThanSec},
 			},
 		); err != nil {
 			return fmt.Errorf("sweep rate limits: %w", err)
 		}
-
-		var changed int64
-		if err := sqlitex.Execute(tx.conn,
-			`SELECT changes()`,
-			&sqlitex.ExecOptions{
-				ResultFunc: func(stmt *sqlite.Stmt) error {
-					changed = stmt.ColumnInt64(0)
-					return nil
-				},
-			},
-		); err != nil {
-			return fmt.Errorf("sweep changes: %w", err)
-		}
-		count = int(changed)
+		count = tx.conn.Changes()
 		return nil
 	})
 	return count, err

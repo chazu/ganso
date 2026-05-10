@@ -1,4 +1,4 @@
-package honker
+package ganso
 
 import (
 	"fmt"
@@ -49,7 +49,7 @@ func ParseSchedule(expr string) (Schedule, error) {
 func Crontab(expr string) (Schedule, error) {
 	expr = strings.TrimSpace(expr)
 	if strings.HasPrefix(expr, "@every ") {
-		return nil, fmt.Errorf("honker: Crontab does not accept interval expressions: %q", expr)
+		return nil, fmt.Errorf("ganso: Crontab does not accept interval expressions: %q", expr)
 	}
 	return parseCron(expr)
 }
@@ -65,17 +65,17 @@ func parseInterval(expr string) (Schedule, error) {
 	raw := strings.TrimPrefix(expr, "@every ")
 	raw = strings.TrimSpace(raw)
 	if len(raw) < 2 {
-		return nil, fmt.Errorf("honker: invalid interval expression: %q", expr)
+		return nil, fmt.Errorf("ganso: invalid interval expression: %q", expr)
 	}
 
 	unit := raw[len(raw)-1]
 	digits := raw[:len(raw)-1]
 	n, err := strconv.Atoi(digits)
 	if err != nil {
-		return nil, fmt.Errorf("honker: invalid interval number in %q: %w", expr, err)
+		return nil, fmt.Errorf("ganso: invalid interval number in %q: %w", expr, err)
 	}
 	if n <= 0 {
-		return nil, fmt.Errorf("honker: interval must be positive in %q", expr)
+		return nil, fmt.Errorf("ganso: interval must be positive in %q", expr)
 	}
 
 	var d time.Duration
@@ -89,7 +89,7 @@ func parseInterval(expr string) (Schedule, error) {
 	case 'd':
 		d = time.Duration(n) * 24 * time.Hour
 	default:
-		return nil, fmt.Errorf("honker: unknown interval unit %q in %q", string(unit), expr)
+		return nil, fmt.Errorf("ganso: unknown interval unit %q in %q", string(unit), expr)
 	}
 
 	return &IntervalSchedule{interval: d, expr: expr}, nil
@@ -106,42 +106,42 @@ func parseCron(expr string) (*CronSchedule, error) {
 		// minute hour dom month dow
 		cs.seconds = []int{0}
 		if cs.minutes, err = parseField(fields[0], 0, 59); err != nil {
-			return nil, fmt.Errorf("honker: minute field: %w", err)
+			return nil, fmt.Errorf("ganso: minute field: %w", err)
 		}
 		if cs.hours, err = parseField(fields[1], 0, 23); err != nil {
-			return nil, fmt.Errorf("honker: hour field: %w", err)
+			return nil, fmt.Errorf("ganso: hour field: %w", err)
 		}
 		if cs.days, err = parseField(fields[2], 1, 31); err != nil {
-			return nil, fmt.Errorf("honker: day field: %w", err)
+			return nil, fmt.Errorf("ganso: day field: %w", err)
 		}
 		if cs.months, err = parseField(fields[3], 1, 12); err != nil {
-			return nil, fmt.Errorf("honker: month field: %w", err)
+			return nil, fmt.Errorf("ganso: month field: %w", err)
 		}
 		if cs.dows, err = parseField(fields[4], 0, 6); err != nil {
-			return nil, fmt.Errorf("honker: dow field: %w", err)
+			return nil, fmt.Errorf("ganso: dow field: %w", err)
 		}
 	case 6:
 		// second minute hour dom month dow
 		if cs.seconds, err = parseField(fields[0], 0, 59); err != nil {
-			return nil, fmt.Errorf("honker: second field: %w", err)
+			return nil, fmt.Errorf("ganso: second field: %w", err)
 		}
 		if cs.minutes, err = parseField(fields[1], 0, 59); err != nil {
-			return nil, fmt.Errorf("honker: minute field: %w", err)
+			return nil, fmt.Errorf("ganso: minute field: %w", err)
 		}
 		if cs.hours, err = parseField(fields[2], 0, 23); err != nil {
-			return nil, fmt.Errorf("honker: hour field: %w", err)
+			return nil, fmt.Errorf("ganso: hour field: %w", err)
 		}
 		if cs.days, err = parseField(fields[3], 1, 31); err != nil {
-			return nil, fmt.Errorf("honker: day field: %w", err)
+			return nil, fmt.Errorf("ganso: day field: %w", err)
 		}
 		if cs.months, err = parseField(fields[4], 1, 12); err != nil {
-			return nil, fmt.Errorf("honker: month field: %w", err)
+			return nil, fmt.Errorf("ganso: month field: %w", err)
 		}
 		if cs.dows, err = parseField(fields[5], 0, 6); err != nil {
-			return nil, fmt.Errorf("honker: dow field: %w", err)
+			return nil, fmt.Errorf("ganso: dow field: %w", err)
 		}
 	default:
-		return nil, fmt.Errorf("honker: expected 5 or 6 cron fields, got %d in %q", len(fields), expr)
+		return nil, fmt.Errorf("ganso: expected 5 or 6 cron fields, got %d in %q", len(fields), expr)
 	}
 	return cs, nil
 }
