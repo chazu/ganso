@@ -198,11 +198,17 @@ func (w *UpdateWatcher) run() {
 			if tickCount%100 == 0 {
 				fid, err := getFileIdentity(w.path)
 				if err != nil {
-					log.Printf("ganso: watcher: file identity check failed: %v", err)
-					continue
+					// The database file is gone (store closed / temp dir removed).
+					// Stop watching quietly rather than spamming the log every
+					// 100 ticks or leaking the goroutine.
+					return
 				}
 				if !initialFID.equal(fid) {
-					log.Fatalf("ganso: watcher: database file was replaced (inode/identity changed); aborting")
+					// The file was replaced out from under us (e.g. a backup
+					// restore). Stop watching this stale handle — do NOT
+					// log.Fatalf, which would kill the entire host process.
+					log.Printf("ganso: watcher: database file replaced; stopping watcher for %s", w.path)
+					return
 				}
 			}
 		}
