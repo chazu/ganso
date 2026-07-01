@@ -13,9 +13,10 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA busy_timeout = 5000;
 PRAGMA foreign_keys = ON;
-PRAGMA cache_size = -32000;
+PRAGMA cache_size = -8000;
 PRAGMA temp_store = MEMORY;
-PRAGMA wal_autocheckpoint = 10000;
+PRAGMA wal_autocheckpoint = 1000;
+PRAGMA journal_size_limit = 4194304;
 `
 
 const bootstrapSQL = `

@@ -13,8 +13,15 @@ type openConfig struct {
 
 func defaultOpenConfig() openConfig {
 	return openConfig{
-		maxReaders:   10,
-		pollInterval: time.Millisecond,
+		// A single-writer coordination store (e.g. one dispatcher goroutine +
+		// a few dashboard readers) does not need 10 reader connections, each of
+		// which carries its own page cache. 3 keeps the page-cache ceiling and
+		// open-handle count small; callers who need more pass WithMaxReaders.
+		maxReaders: 3,
+		// 1ms was a busy-poll: a watcher with no consumers issued ~1000
+		// PRAGMA data_version reads/sec. 250ms is ample for change notification
+		// and near-eliminates the idle wakeup/CPU cost.
+		pollInterval: 250 * time.Millisecond,
 	}
 }
 
